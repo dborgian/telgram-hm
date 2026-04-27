@@ -7,7 +7,7 @@ API_ID: int = int(os.environ["API_ID"])
 API_HASH: str = os.environ["API_HASH"]
 SESSION_STRING: str = os.environ["SESSION_STRING"]
 OPENAI_API_KEY: str = os.environ["OPENAI_API_KEY"]
-GEMINI_API_KEY: str = os.environ["GEMINI_API_KEY"]
+GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")  # opzionale, non usato
 
 TEST_MODE_ENABLED: bool = os.getenv("TEST_MODE_ENABLED", "false").lower() == "true"
 TEST_USERS: list[int] = [
@@ -42,6 +42,7 @@ ALERT_CHAT_ID: int | None = (
 )
 
 # Webhook Calendly — server HTTP interno
-WEBHOOK_PORT: int = int(os.getenv("WEBHOOK_PORT", "8080"))
+# Railway inietta PORT automaticamente — usala se disponibile, altrimenti WEBHOOK_PORT
+WEBHOOK_PORT: int = int(os.getenv("PORT", os.getenv("WEBHOOK_PORT", "8080")))
 # Secret opzionale per validare le richieste Calendly (Calendly-Webhook-Signature header)
 CALENDLY_WEBHOOK_SECRET: str = os.getenv("CALENDLY_WEBHOOK_SECRET", "")
