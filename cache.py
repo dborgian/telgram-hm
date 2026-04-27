@@ -93,3 +93,9 @@ async def invalidate_profile(user_id: int) -> None:
     """Invalida la cache profilo (es. dopo update_stage o call_booked)."""
     r = get_redis()
     await r.delete(_profile_key(user_id))
+
+
+async def clear_history(user_id: int) -> None:
+    """Cancella la history chat da Redis."""
+    r = get_redis()
+    await r.delete(_history_key(user_id))

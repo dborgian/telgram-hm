@@ -1,14 +1,66 @@
 import asyncio
 import logging
+from aiohttp import web
 
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
 from telethon.sessions import StringSession
 
 import config
+import db
 import llm
 from db import init_db
 from processor import process_conversation
+
+# ---------------------------------------------------------------------------
+# Calendly webhook server
+# ---------------------------------------------------------------------------
+
+
+async def _handle_calendly_webhook(request: web.Request) -> web.Response:
+    """POST /webhook/calendly — aggiorna call_booked quando Calendly conferma una prenotazione."""
+    try:
+        payload = await request.json()
+    except Exception:
+        return web.Response(status=400, text="invalid json")
+
+    # Estrai user_id da utm_source (come da Call booking.json di n8n)
+    try:
+        utm_source = payload["payload"]["tracking"]["utm_source"]
+        user_id = int(utm_source)
+    except (KeyError, TypeError, ValueError):
+        logger.warning(
+            "Calendly webhook: utm_source mancante o non valido: %s", payload
+        )
+        return web.Response(status=400, text="utm_source mancante")
+
+    event_type = payload.get("event", "")
+    logger.info("Calendly webhook: event=%s user_id=%d", event_type, user_id)
+
+    if event_type == "invitee.created":
+        await db.set_call_booked(user_id, True)
+        logger.info(
+            "call_booked=True impostato per user %d via Calendly webhook", user_id
+        )
+    elif event_type == "invitee.canceled":
+        await db.set_call_booked(user_id, False)
+        logger.info(
+            "call_booked=False impostato per user %d (cancellazione Calendly)", user_id
+        )
+
+    return web.Response(status=200, text="ok")
+
+
+async def _start_webhook_server() -> web.AppRunner:
+    app = web.Application()
+    app.router.add_post("/webhook/calendly", _handle_calendly_webhook)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", config.WEBHOOK_PORT)
+    await site.start()
+    logger.info("Webhook server avviato su porta %d", config.WEBHOOK_PORT)
+    return runner
+
 
 logging.basicConfig(
     level=getattr(logging, config.LOG_LEVEL, logging.INFO),
@@ -131,9 +183,21 @@ async def main() -> None:
             _queues[sender_id].qsize(),
         )
 
+    webhook_runner = await _start_webhook_server()
+
     await client.start()
     logger.info("Userbot connected and listening")
-    await client.run_until_disconnected()
+    try:
+        await client.run_until_disconnected()
+    finally:
+        await webhook_runner.cleanup()
+        logger.info("Webhook server fermato")
+        logger.info("Shutting down — cancelling %d worker task(s)", len(_workers))
+        for task in _workers.values():
+            task.cancel()
+        if _workers:
+            await asyncio.gather(*_workers.values(), return_exceptions=True)
+        logger.info("All worker tasks cancelled")
 
 
 if __name__ == "__main__":

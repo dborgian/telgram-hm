@@ -75,7 +75,7 @@ async def get_customer(user_id: int) -> dict | None:
     profile = dict(res.data)
     # Flatten conversation_state nested object
     cs = profile.pop("conversation_state", None) or {}
-    profile["conversation_stage"] = cs.get("conversation_stage", "introduction")
+    profile["conversation_stage"] = cs.get("conversation_stage", "stage_1_greet")
     profile["turn_count"] = cs.get("turn_count", 0)
     return profile
 
@@ -113,13 +113,25 @@ async def increment_turn_count(user_id: int) -> None:
     await sb.rpc("increment_turn_count", {"p_user_id": user_id}).execute()
 
 
-async def set_call_booked(user_id: int) -> None:
-    """Imposta call_booked=true. Chiamato dal webhook Calendly."""
+async def set_call_booked(user_id: int, booked: bool = True) -> None:
+    """Imposta call_booked. Chiamato dal webhook Calendly o dai test."""
     sb = await get_client()
     await (
         sb.table("customers")
-        .update({"call_booked": True})
+        .update({"call_booked": booked})
         .eq("user_id", user_id)
         .execute()
     )
-    logger.info("call_booked=true per user %d", user_id)
+    logger.info("call_booked=%s per user %d", booked, user_id)
+
+
+async def set_lead_status(user_id: int, status: str) -> None:
+    """Aggiorna il campo status del cliente su Supabase."""
+    sb = await get_client()
+    await (
+        sb.table("customers")
+        .update({"status": status})
+        .eq("user_id", user_id)
+        .execute()
+    )
+    logger.info("status=%s per user %d", status, user_id)

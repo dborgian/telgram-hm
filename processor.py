@@ -4,6 +4,7 @@ import random
 from telethon.errors import FloodWaitError
 import db
 import llm
+import notifier
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +44,56 @@ async def process_conversation(
         await db.upsert_customer(user_id, first_name, username)
         history = await db.get_history(user_id)
         customer = await db.get_customer(user_id)
-        stage = await llm.detect_stage(customer, history[-6:], combined_text)
+        # Step 1: classifica stage (temp=0.0, veloce)
+        stage, assistance_needed = await llm.classify_stage(
+            customer, history[-6:], combined_text
+        )
         await db.update_stage(user_id, stage)
+
+        # Se serve assistenza umana: logga, notifica e non rispondere
+        if assistance_needed:
+            logger.warning(
+                "assistance_needed=True per user %d — nessuna risposta AI inviata",
+                user_id,
+            )
+            await db.save_turn(user_id, combined_text, "[ASSISTANCE_NEEDED]")
+            await notifier.notify_alert(
+                client,
+                user_id,
+                first_name,
+                username,
+                reason="ASSISTENZA UMANA RICHIESTA",
+                stage=stage,
+                extra=f"Messaggio: {combined_text[:200]}",
+            )
+            return
+
+        # Step 2: genera risposta (temp=0.8, qualità)
         reply = await llm.generate_reply(
             history, customer, combined_text, stage, user_id
         )
+
+        # DISENGAGE: il modello segnala di chiudere la conversazione — non inviare nulla
+        if reply.strip().upper() == "DISENGAGE":
+            logger.info("DISENGAGE per user %d — nessuna risposta inviata", user_id)
+            await db.save_turn(user_id, combined_text, "[DISENGAGE]")
+            await db.set_lead_status(user_id, "LL")
+            await notifier.notify_alert(
+                client,
+                user_id,
+                first_name,
+                username,
+                reason="LEAD CHIUSA (Lost Lead)",
+                stage=stage,
+            )
+            return
+
         await db.save_turn(user_id, combined_text, reply)
+
+        # stage_9: attendi 45s prima di inviare (replica n8n Wait node)
+        if stage == "stage_9_uninterested":
+            logger.info("stage_9: attesa 45s prima di inviare a user %d", user_id)
+            await asyncio.sleep(45)
 
         chunks = _split_reply(reply)
         for chunk in chunks:

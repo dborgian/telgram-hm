@@ -7,6 +7,7 @@ API_ID: int = int(os.environ["API_ID"])
 API_HASH: str = os.environ["API_HASH"]
 SESSION_STRING: str = os.environ["SESSION_STRING"]
 OPENAI_API_KEY: str = os.environ["OPENAI_API_KEY"]
+GEMINI_API_KEY: str = os.environ["GEMINI_API_KEY"]
 
 TEST_MODE_ENABLED: bool = os.getenv("TEST_MODE_ENABLED", "false").lower() == "true"
 TEST_USERS: list[int] = [
@@ -33,3 +34,14 @@ PROFILE_CACHE_TTL: int = int(os.getenv("PROFILE_CACHE_TTL", "3600"))
 # Link VSL e Calendly (utm_source viene aggiunto dinamicamente con user_id)
 VSL_BASE_URL: str = "https://go.onlineperdonne.com/vsl-513194"
 CALENDLY_BASE_URL: str = "https://calendly.com/chat-manager/onlineconmary"
+
+# Notifiche interne — Telegram chat ID dove inviare alert (assistance_needed, DISENGAGE)
+# Lascia vuoto per disabilitare le notifiche
+ALERT_CHAT_ID: int | None = (
+    int(os.environ["ALERT_CHAT_ID"]) if os.getenv("ALERT_CHAT_ID") else None
+)
+
+# Webhook Calendly — server HTTP interno
+WEBHOOK_PORT: int = int(os.getenv("WEBHOOK_PORT", "8080"))
+# Secret opzionale per validare le richieste Calendly (Calendly-Webhook-Signature header)
+CALENDLY_WEBHOOK_SECRET: str = os.getenv("CALENDLY_WEBHOOK_SECRET", "")
