@@ -72,6 +72,8 @@ logger = logging.getLogger(__name__)
 _queues: dict[int, asyncio.Queue] = {}
 # user_id -> running worker Task
 _workers: dict[int, asyncio.Task] = {}
+# dedup: set of message IDs already enqueued (max 500 entries)
+_seen_msg_ids: set[int] = set()
 
 
 async def _user_worker(
@@ -161,6 +163,16 @@ async def main() -> None:
 
         if config.TEST_MODE_ENABLED and sender_id not in config.TEST_USERS:
             return
+
+        msg_id: int = event.message.id
+        if msg_id in _seen_msg_ids:
+            logger.debug(
+                "Duplicate event for msg_id=%d user=%d — skipped", msg_id, sender_id
+            )
+            return
+        _seen_msg_ids.add(msg_id)
+        if len(_seen_msg_ids) > 500:
+            _seen_msg_ids.clear()
 
         sender = await event.get_sender()
         first_name: str | None = getattr(sender, "first_name", None)
