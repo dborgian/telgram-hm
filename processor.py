@@ -12,6 +12,23 @@ logger = logging.getLogger(__name__)
 # Keeps context symmetric and bounded.
 _HISTORY_CONTEXT = 10
 
+# Ordered stage progression — used for anti-regression guard.
+# Supabase conversation_stage is the single source of truth; the LLM
+# is never allowed to move a lead *backwards* except for the CB gate
+# (Calendly cancellation forces stage_7_rescheduling when call_booked=False).
+_STAGE_ORDER = [
+    "stage_1_greet",
+    "stage_2_video",
+    "stage_3_post_video",
+    "stage_4_answering_questions",
+    "stage_5_booking",
+    "stage_6_verifying",
+    "stage_7_rescheduling",
+    "stage_8_postbooking",
+    "stage_9_uninterested",
+    "stage_10_budget_questioning",
+]
+
 
 def _split_reply(text: str) -> list[str]:
     """Spezza una risposta lunga in chunk naturali."""
@@ -53,6 +70,26 @@ async def process_conversation(
         stage, assistance_needed = await llm.classify_stage(
             customer, ctx_history, combined_text
         )
+
+        # Anti-regression guard: Supabase è source of truth per lo stage.
+        # Il modello non può retrocedere un lead (es. Redis vuota → stage_1).
+        # Unica eccezione: CB gate con call_booked=False forza stage_7 (cancellazione Calendly).
+        current_stage = (customer or {}).get("conversation_stage", "stage_1_greet")
+        if current_stage in _STAGE_ORDER and stage in _STAGE_ORDER:
+            call_booked = bool((customer or {}).get("call_booked", False))
+            is_cb_regression = not call_booked and stage == "stage_7_rescheduling"
+            if (
+                _STAGE_ORDER.index(stage) < _STAGE_ORDER.index(current_stage)
+                and not is_cb_regression
+            ):
+                logger.warning(
+                    "Stage regression bloccato: %s → %s (mantengo %s)",
+                    current_stage,
+                    stage,
+                    current_stage,
+                )
+                stage = current_stage
+
         await db.update_stage(user_id, stage)
 
         # Se serve assistenza umana: logga, notifica e non rispondere
