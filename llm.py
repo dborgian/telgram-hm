@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from openai import AsyncOpenAI, RateLimitError, APIError
-from models import CustomerProfile, HistoryTurn
+from db import CustomerProfile, HistoryTurn
 from tenacity import (
     retry,
     stop_after_attempt,
