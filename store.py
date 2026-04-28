@@ -122,6 +122,12 @@ async def update_stage(user_id: int, stage: str) -> None:
         )
         .execute()
     )
+    await _with_supabase_retry(
+        lambda sb: sb.table("customers")
+        .update({"stage": stage})
+        .eq("user_id", user_id)
+        .execute()
+    )
     logger.debug("updated stage for user %d → %s", user_id, stage)
 
 
