@@ -32,6 +32,9 @@ _STAGE_ORDER = [
 
 def _split_reply(text: str) -> list[str]:
     """Spezza una risposta lunga in chunk naturali."""
+    # Non splittare se il testo contiene un URL — preserva il link con il suo contesto
+    if "https://" in text or "http://" in text:
+        return [text]
     # Prima prova a splittare su paragrafi doppi
     chunks = [c.strip() for c in text.split("\n\n") if c.strip()]
     if len(chunks) == 1 and len(text) > 250:
