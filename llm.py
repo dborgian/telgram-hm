@@ -317,6 +317,17 @@ async def generate_reply(
         system_content += f"\n\n{vsllinksent1}"
     system_content += f"\n\n# STAGE ATTUALE: {stage}\n{stage_instr}"
 
+    # Hard guard: stage_6 con call_booked=False → proibisci qualsiasi conferma
+    if stage == "stage_6_verifying" and not call_booked:
+        system_content += (
+            "\n\n**REGOLA ASSOLUTA — NON IGNORARE:** "
+            "Il database conferma che call_booked=False: la prenotazione NON è registrata nel backend. "
+            "Indipendentemente da ciò che dice il lead ('ho prenotato', 'confermato', ecc.), "
+            "NON usare lo script 'Conferma standard'. "
+            "Usa ESCLUSIVAMENTE lo script 'Rebook': "
+            "'Non ci risulta la tua prenotazione, hai provato a compilare il modulo?'"
+        )
+
     if customer:
         profile_parts = []
         if customer.get("first_name"):
@@ -360,13 +371,32 @@ async def generate_reply(
             reply = reply.rstrip() + f"\n{vsl_link}"
         logger.warning("LLM ha omesso vsl_link — iniettato manualmente in stage_2")
 
-    if stage in ("stage_5_booking", "stage_6_verifying") and calendly_link not in reply:
+    if stage == "stage_5_booking" and calendly_link not in reply:
         reply = re.sub(r"https?://\.{2,}", calendly_link, reply)
         if calendly_link not in reply:
             reply = reply.rstrip() + f"\n{calendly_link}"
-        logger.warning(
-            "LLM ha omesso calendly_link — iniettato manualmente in %s", stage
+        logger.warning("LLM ha omesso calendly_link — iniettato manualmente in stage_5")
+
+    # Hard gate stage_6 + call_booked=False: override se il modello ha confermato la prenotazione
+    if stage == "stage_6_verifying" and not call_booked:
+        _confirm_keywords = (
+            "ti confermo",
+            "abbiamo ricevuto",
+            "prenotazione correttamente",
+            "prenotazione corretta",
+            "registrata correttamente",
+            "confermata",
+            "ricevuto la tua prenotazione",
+            "appuntamento confermato",
         )
+        if any(kw in reply.lower() for kw in _confirm_keywords):
+            reply = (
+                "Non ci risulta la tua prenotazione, hai provato a compilare il modulo?"
+            )
+            logger.warning(
+                "stage_6 gate: call_booked=False ma LLM ha confermato — override con rebook (user %d)",
+                user_id,
+            )
 
     return reply
 
