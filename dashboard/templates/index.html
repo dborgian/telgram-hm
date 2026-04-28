@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="it" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HM Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    body { background-color: #0f1117; color: #f3f4f6; }
+    .scrollbar-thin::-webkit-scrollbar { width: 4px; height: 4px; }
+    .scrollbar-thin::-webkit-scrollbar-track { background: #1a1d27; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #3d4260; border-radius: 2px; }
+    .bar-animate { transition: width 0.6s cubic-bezier(0.4,0,0.2,1); }
+  </style>
+</head>
+<body class="h-full" x-data="dashboard()" x-init="init()">
+
+<div class="flex h-screen overflow-hidden">
+
+  <!-- SIDEBAR -->
+  <aside class="w-[220px] flex-shrink-0 flex flex-col" style="background:#1a1d27;border-right:1px solid #2d3248;">
+    <div class="px-5 py-5" style="border-bottom:1px solid #2d3248;">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-sm" style="background:#4f46e5;">HM</div>
+        <span class="font-semibold text-white text-sm tracking-wide">HM Dashboard</span>
+      </div>
+    </div>
+    <nav class="flex-1 px-3 py-4 space-y-1">
+      <template x-for="item in navItems" :key="item.key">
+        <button @click="view = item.key"
+          class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all"
+          :style="view===item.key ? 'background:rgba(79,70,229,0.15);color:#818cf8;border:1px solid rgba(79,70,229,0.3);' : 'color:#9ca3af;border:1px solid transparent;'"
+          @mouseover="if(view!==item.key) $el.style.background='#22263a'"
+          @mouseleave="if(view!==item.key) $el.style.background=''">
+          <span x-html="item.icon" class="flex-shrink-0"></span>
+          <span x-text="item.label"></span>
+        </button>
+      </template>
+    </nav>
+    <div class="px-4 py-4" style="border-top:1px solid #2d3248;">
+      <div class="text-xs mb-3" style="color:#6b7280;">
+        Ultimo aggiornamento:
+        <span x-text="lastRefresh ? formatDate(lastRefresh) : '—'" class="block mt-0.5" style="color:#9ca3af;"></span>
+      </div>
+      <button @click="loadAll()" :disabled="loading"
+        class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium"
+        style="background:#4f46e5;color:white;"
+        @mouseover="if(!loading) $el.style.background='#4338ca'"
+        @mouseleave="$el.style.background='#4f46e5'">
+        <svg x-show="!loading" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        <svg x-show="loading" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/></svg>
+        <span x-text="loading ? 'Caricamento...' : 'Aggiorna'"></span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="flex-1 overflow-y-auto scrollbar-thin" style="background:#0f1117;">
+
+    <!-- DASHBOARD VIEW -->
+    <div x-show="view==='dashboard'" x-cloak>
+      <div class="p-6 space-y-6">
+        <h1 class="text-xl font-semibold text-white">Dashboard</h1>
+        <!-- KPI Cards -->
+        <div class="grid grid-cols-5 gap-4">
+          <template x-for="kpi in kpiCards" :key="kpi.label">
+            <div class="rounded-xl p-4 space-y-2" style="background:#1a1d27;border:1px solid #2d3248;">
+              <div class="text-xs font-medium uppercase tracking-wider" style="color:#6b7280;" x-text="kpi.label"></div>
+              <div class="text-3xl font-bold" :style="`color:${kpi.color}`" x-text="kpi.value"></div>
+              <div class="text-xs" style="color:#6b7280;" x-text="kpi.sub"></div>
+            </div>
+          </template>
+        </div>
+        <!-- Funnel + Alerts -->
+        <div class="grid grid-cols-3 gap-4">
+          <div class="col-span-2 rounded-xl p-5" style="background:#1a1d27;border:1px solid #2d3248;">
+            <h2 class="text-sm font-semibold mb-4" style="color:#d1d5db;">Funnel Clienti</h2>
+            <div class="space-y-2.5" x-show="funnelRows.length>0">
+              <template x-for="row in funnelRows" :key="row.key">
+                <div class="flex items-center gap-3">
+                  <div class="text-xs text-right flex-shrink-0 w-40" style="color:#9ca3af;" x-text="stageLabel(row.key)"></div>
+                  <div class="flex-1 rounded-full h-5 overflow-hidden" style="background:#22263a;">
+                    <div class="h-5 rounded-full bar-animate flex items-center justify-end pr-2"
+                      :style="`width:${funnelMaxCount>0 ? Math.max(4,row.count/funnelMaxCount*100) : 0}%;background-color:${stageHexColor(row.key)};`">
+                      <span class="text-xs font-semibold text-white" x-show="row.count>0" x-text="row.count"></span>
+                    </div>
+                  </div>
+                  <div class="w-8 text-xs text-right" style="color:#6b7280;" x-text="row.count"></div>
+                </div>
+              </template>
+            </div>
+            <div x-show="funnelRows.length===0" class="text-sm py-8 text-center" style="color:#6b7280;">Nessun dato disponibile</div>
+          </div>
+          <div class="rounded-xl p-5 overflow-y-auto max-h-96 scrollbar-thin" style="background:#1a1d27;border:1px solid #2d3248;">
+            <h2 class="text-sm font-semibold mb-4" style="color:#d1d5db;">Avvisi Recenti</h2>
+            <div class="space-y-2">
+              <template x-for="(a,i) in allAlerts" :key="i">
+                <div class="rounded-lg p-3 space-y-1" style="background:#22263a;">
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="text-sm font-medium" style="color:#e5e7eb;" x-text="a.name||a.username||a.user_id||'?'"></div>
+                    <span class="flex-shrink-0 text-xs px-2 py-0.5 rounded-full font-semibold"
+                      :style="a.type==='assistance_needed' ? 'background:rgba(249,115,22,0.15);color:#fb923c;' : 'background:rgba(239,68,68,0.15);color:#f87171;'"
+                      x-text="a.type==='assistance_needed' ? 'ASSISTENZA' : 'PERSO'"></span>
+                  </div>
+                  <div class="text-xs" style="color:#6b7280;" x-text="stageLabel(a.stage)"></div>
+                  <div class="text-xs" style="color:#4b5563;" x-text="formatDate(a.timestamp||a.last_seen)"></div>
+                </div>
+              </template>
+              <div x-show="allAlerts.length===0" class="text-sm py-4 text-center" style="color:#6b7280;">Nessun avviso</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CLIENTI VIEW -->
+    <div x-show="view==='clienti'" x-cloak>
+      <div class="p-6 space-y-4">
+        <h1 class="text-xl font-semibold text-white">Clienti</h1>
+        <!-- Filters -->
+        <div class="rounded-xl p-4 flex flex-wrap gap-3 items-center" style="background:#1a1d27;border:1px solid #2d3248;">
+          <div class="relative">
+            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style="color:#6b7280;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            <input type="text" x-model="searchQuery" placeholder="Cerca nome o username..."
+              class="rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none w-52"
+              style="background:#22263a;border:1px solid #3d4260;color:#e5e7eb;" />
+          </div>
+          <select x-model="filterStage" class="rounded-lg px-3 py-2 text-sm focus:outline-none" style="background:#22263a;border:1px solid #3d4260;color:#d1d5db;">
+            <option value="">Tutti gli stage</option>
+            <template x-for="(label,key) in STAGE_LABELS" :key="key">
+              <option :value="key" x-text="label"></option>
+            </template>
+          </select>
+          <select x-model="filterStatus" class="rounded-lg px-3 py-2 text-sm focus:outline-none" style="background:#22263a;border:1px solid #3d4260;color:#d1d5db;">
+            <option value="">Tutti gli status</option>
+            <option value="LL">LL (Lead Perso)</option>
+          </select>
+          <label class="flex items-center gap-2 cursor-pointer text-sm" style="color:#9ca3af;">
+            <input type="checkbox" x-model="filterCallBooked" class="rounded" />
+            Solo call prenotate
+          </label>
+          <div class="ml-auto text-sm" style="color:#6b7280;"><span x-text="filteredCustomers.length"></span> clienti</div>
+        </div>
+        <!-- Table -->
+        <div class="rounded-xl overflow-hidden" style="background:#1a1d27;border:1px solid #2d3248;">
+          <div class="overflow-x-auto scrollbar-thin">
+            <table class="w-full text-sm">
+              <thead>
+                <tr style="border-bottom:1px solid #2d3248;">
+                  <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Nome</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Username</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Stage</th>
+                  <th class="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Call</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Status</th>
+                  <th class="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Turni</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Visto</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider w-44" style="color:#6b7280;">Note</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Azioni</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="c in filteredCustomers" :key="c.user_id">
+                  <tr @click="openCustomer(c.user_id)" class="cursor-pointer transition-colors"
+                    style="border-bottom:1px solid #22263a;"
+                    @mouseover="$el.style.background='#22263a'" @mouseleave="$el.style.background=''">
+                    <td class="px-4 py-3 font-medium" style="color:#e5e7eb;" x-text="c.first_name||'—'"></td>
+                    <td class="px-4 py-3" style="color:#9ca3af;" x-text="c.username ? '@'+c.username : '—'"></td>
+                    <td class="px-4 py-3" @click.stop>
+                      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                        :style="`background:${stageHexColor(c.stage)}22;color:${stageHexColor(c.stage)};`"
+                        x-text="stageLabel(c.stage)"></span>
+                    </td>
+                    <td class="px-4 py-3 text-center" @click.stop>
+                      <template x-if="c.call_booked">
+                        <svg class="w-4 h-4 inline" style="color:#4ade80;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                      </template>
+                      <template x-if="!c.call_booked"><span style="color:#4b5563;">—</span></template>
+                    </td>
+                    <td class="px-4 py-3" @click.stop>
+                      <template x-if="c.status==='LL'">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style="background:rgba(239,68,68,0.15);color:#f87171;">LL</span>
+                      </template>
+                      <template x-if="c.status!=='LL'">
+                        <select :value="c.status||''" @change.stop="saveStatus(c.user_id,$event.target.value);c.status=$event.target.value" @click.stop
+                          class="rounded px-2 py-0.5 text-xs focus:outline-none" style="background:#22263a;border:1px solid #3d4260;color:#9ca3af;">
+                          <option value="">—</option>
+                          <option value="LL">LL</option>
+                          <option value="active">Attivo</option>
+                          <option value="paused">In pausa</option>
+                        </select>
+                      </template>
+                    </td>
+                    <td class="px-4 py-3 text-center" style="color:#9ca3af;" x-text="c.turn_count??'—'"></td>
+                    <td class="px-4 py-3 text-xs" style="color:#6b7280;" x-text="c.last_seen ? formatDate(c.last_seen) : '—'"></td>
+                    <td class="px-4 py-3 w-44" @click.stop>
+                      <input type="text" :value="c.notes||''" placeholder="Aggiungi nota..."
+                        class="w-full rounded px-2 py-1 text-xs focus:outline-none transition-all"
+                        style="background:transparent;border:1px solid transparent;color:#9ca3af;"
+                        @focus="$el.style.background='#22263a';$el.style.borderColor='#4f46e5';"
+                        @blur="$el.style.background='transparent';$el.style.borderColor='transparent';saveNote(c.user_id,$event.target.value);c.notes=$event.target.value;"
+                        @mouseover="if(document.activeElement!==$el)$el.style.borderColor='#3d4260'"
+                        @mouseleave="if(document.activeElement!==$el)$el.style.borderColor='transparent'"
+                        @keydown.enter.prevent="saveNote(c.user_id,$event.target.value);c.notes=$event.target.value;$event.target.blur()" />
+                    </td>
+                    <td class="px-4 py-3" @click.stop>
+                      <button @click.stop="openCustomer(c.user_id)" class="text-xs" style="color:#818cf8;"
+                        @mouseover="$el.style.color='#a5b4fc'" @mouseleave="$el.style.color='#818cf8'">Dettaglio →</button>
+                    </td>
+                  </tr>
+                </template>
+                <tr x-show="filteredCustomers.length===0">
+                  <td colspan="9" class="px-4 py-10 text-center text-sm" style="color:#4b5563;">Nessun cliente trovato</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- METRICHE VIEW -->
+    <div x-show="view==='metriche'" x-cloak>
+      <div class="p-6 space-y-4">
+        <h1 class="text-xl font-semibold text-white">Metriche per Stage</h1>
+        <div class="rounded-xl overflow-hidden" style="background:#1a1d27;border:1px solid #2d3248;">
+          <div class="overflow-x-auto scrollbar-thin">
+            <table class="w-full text-sm">
+              <thead>
+                <tr style="border-bottom:1px solid #2d3248;">
+                  <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Stage</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Impressioni</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Avanzamenti</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Abbandoni</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Tasso Avanzamento</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Tasso Abbandono</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Tempo Risposta Medio</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="m in metrics" :key="m.stage">
+                  <tr style="border-bottom:1px solid #1a1d27;" @mouseover="$el.style.background='#22263a'" @mouseleave="$el.style.background=''">
+                    <td class="px-4 py-3">
+                      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                        :style="`background:${stageHexColor(m.stage)}22;color:${stageHexColor(m.stage)};`"
+                        x-text="stageLabel(m.stage)"></span>
+                    </td>
+                    <td class="px-4 py-3 text-right" style="color:#d1d5db;" x-text="m.impressions??m.total_entries??'—'"></td>
+                    <td class="px-4 py-3 text-right" style="color:#d1d5db;" x-text="m.advances??m.exits??'—'"></td>
+                    <td class="px-4 py-3 text-right" style="color:#d1d5db;" x-text="m.drops??m.drop_offs??'—'"></td>
+                    <td class="px-4 py-3 text-right font-medium" :style="`color:${advanceRateHex(m.advance_rate??m.advancement_rate)}`" x-text="formatPct(m.advance_rate??m.advancement_rate)"></td>
+                    <td class="px-4 py-3 text-right" style="color:#9ca3af;" x-text="formatPct(m.drop_rate??m.abandonment_rate)"></td>
+                    <td class="px-4 py-3 text-right" style="color:#9ca3af;" x-text="formatDuration(m.avg_response_time??m.avg_response_time_seconds)"></td>
+                  </tr>
+                </template>
+                <tr x-show="metrics.length===0">
+                  <td colspan="7" class="px-4 py-10 text-center text-sm" style="color:#4b5563;">Nessuna metrica disponibile</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SGW VIEW -->
+    <div x-show="view==='sgw'" x-cloak>
+      <div class="p-6 space-y-4">
+        <h1 class="text-xl font-semibold text-white">Suggerimenti SGW</h1>
+        <div class="space-y-4">
+          <template x-for="(s,i) in suggestions" :key="i">
+            <div class="rounded-xl p-5 space-y-3" style="background:#1a1d27;border:1px solid #2d3248;">
+              <div class="flex items-start justify-between gap-4">
+                <div class="space-y-1.5">
+                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                    :style="`background:${stageHexColor(s.stage)}22;color:${stageHexColor(s.stage)};`"
+                    x-text="stageLabel(s.stage)"></span>
+                  <div class="text-xs" style="color:#4b5563;" x-text="s.created_at ? formatDate(s.created_at) : '—'"></div>
+                </div>
+                <span class="flex-shrink-0 text-xs px-3 py-1 rounded-full font-semibold" :style="sgwStatusStyle(s.status)" x-text="(s.status||'—').toUpperCase()"></span>
+              </div>
+              <div x-data="{open:false}">
+                <button @click="open=!open" class="text-xs flex items-center gap-1" style="color:#818cf8;"
+                  @mouseover="$el.style.color='#a5b4fc'" @mouseleave="$el.style.color='#818cf8'">
+                  <svg class="w-3 h-3 transition-transform" :class="open?'rotate-90':''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                  <span x-text="open ? 'Nascondi motivazione' : 'Mostra motivazione'"></span>
+                </button>
+                <div x-show="open" x-cloak class="mt-2 text-sm rounded-lg p-3 leading-relaxed" style="background:#22263a;color:#9ca3af;" x-text="s.rationale||'Nessuna motivazione disponibile.'"></div>
+              </div>
+              <div x-data="{open:false}">
+                <button @click="open=!open" class="text-xs flex items-center gap-1" style="color:#6b7280;"
+                  @mouseover="$el.style.color='#9ca3af'" @mouseleave="$el.style.color='#6b7280'">
+                  <svg class="w-3 h-3 transition-transform" :class="open?'rotate-90':''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                  <span x-text="open ? 'Nascondi metriche' : 'Mostra metriche sorgente'"></span>
+                </button>
+                <pre x-show="open" x-cloak class="mt-2 text-xs rounded-lg p-3 overflow-x-auto scrollbar-thin" style="background:#0f1117;color:#6b7280;" x-text="JSON.stringify(s.source_metrics||{},null,2)"></pre>
+              </div>
+            </div>
+          </template>
+          <div x-show="suggestions.length===0" class="rounded-xl p-10 text-center text-sm" style="background:#1a1d27;border:1px solid #2d3248;color:#4b5563;">
+            Nessun suggerimento disponibile
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- CUSTOMER DETAIL MODAL -->
+<div x-show="selectedCustomer!==null" x-cloak
+  class="fixed inset-0 z-50 flex items-center justify-center p-4"
+  @keydown.escape.window="selectedCustomer=null"
+  role="dialog" aria-modal="true">
+  <div class="absolute inset-0" style="background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);" @click="selectedCustomer=null"></div>
+  <div class="relative z-10 w-full max-w-4xl flex flex-col rounded-2xl overflow-hidden"
+    style="max-height:90vh;background:#1a1d27;border:1px solid #2d3248;"
+    x-transition:enter="transition ease-out duration-200"
+    x-transition:enter-start="opacity-0 scale-95"
+    x-transition:enter-end="opacity-100 scale-100"
+    x-transition:leave="transition ease-in duration-150"
+    x-transition:leave-start="opacity-100 scale-100"
+    x-transition:leave-end="opacity-0 scale-95">
+    <!-- Header -->
+    <div class="flex items-center justify-between px-6 py-4 flex-shrink-0" style="border-bottom:1px solid #2d3248;">
+      <div class="flex items-center gap-3" x-show="selectedCustomer">
+        <div class="w-10 h-10 rounded-full flex items-center justify-center font-semibold text-sm flex-shrink-0"
+          style="background:rgba(79,70,229,0.2);border:1px solid rgba(79,70,229,0.4);color:#818cf8;"
+          x-text="(selectedCustomer?.first_name||'?').charAt(0).toUpperCase()"></div>
+        <div>
+          <div class="font-semibold text-white" x-text="selectedCustomer?.first_name||'Cliente'"></div>
+          <div class="text-sm" style="color:#6b7280;"
+            x-text="[selectedCustomer?.username ? '@'+selectedCustomer.username : null, selectedCustomer?.user_id ? '#'+selectedCustomer.user_id : null].filter(Boolean).join(' · ')"></div>
+        </div>
+      </div>
+      <button @click="selectedCustomer=null"
+        class="w-8 h-8 flex items-center justify-center rounded-lg transition-colors flex-shrink-0"
+        style="color:#9ca3af;"
+        @mouseover="$el.style.background='#22263a';$el.style.color='white'"
+        @mouseleave="$el.style.background='';$el.style.color='#9ca3af'"
+        aria-label="Chiudi">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <!-- Body -->
+    <div class="flex-1 overflow-y-auto scrollbar-thin p-6" x-show="selectedCustomer">
+      <div class="grid grid-cols-2 gap-6">
+        <!-- Profile -->
+        <div class="space-y-4">
+          <h3 class="text-xs font-semibold uppercase tracking-wider" style="color:#6b7280;">Profilo</h3>
+          <div class="rounded-xl p-4 space-y-3" style="background:#22263a;">
+            <template x-for="field in profileFields" :key="field.key">
+              <div class="flex items-start gap-4">
+                <span class="text-xs flex-shrink-0 w-32 pt-0.5" style="color:#6b7280;" x-text="field.label"></span>
+                <span class="text-sm flex-1" style="color:#e5e7eb;" x-html="renderField(field.key, selectedCustomer)"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+        <!-- Transitions -->
+        <div class="space-y-4">
+          <h3 class="text-xs font-semibold uppercase tracking-wider" style="color:#6b7280;">
+            Storico Stage
+            <span x-show="selectedCustomer?.transitions?.length" class="ml-2 px-2 py-0.5 rounded-full text-xs font-normal" style="background:#2d3248;color:#9ca3af;" x-text="(selectedCustomer?.transitions?.length||0)+' eventi'"></span>
+          </h3>
+          <div class="space-y-2">
+            <template x-if="selectedCustomer?.transitions && selectedCustomer.transitions.length>0">
+              <div class="space-y-2">
+                <template x-for="(t,idx) in [...(selectedCustomer?.transitions||[])].reverse()" :key="idx">
+                  <div class="rounded-lg p-3" style="background:#22263a;">
+                    <div class="flex items-center gap-2 text-xs mb-1">
+                      <span style="color:#6b7280;" x-text="stageLabel(t.from_stage||t.stage_from)"></span>
+                      <svg class="w-3 h-3 flex-shrink-0" style="color:#4b5563;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                      <span class="font-medium" style="color:#e5e7eb;" x-text="stageLabel(t.to_stage||t.stage_to)"></span>
+                      <template x-if="t.was_overridden">
+                        <span class="ml-auto px-2 py-0.5 rounded-full text-xs font-medium" style="background:rgba(249,115,22,0.15);color:#fb923c;">Override</span>
+                      </template>
+                    </div>
+                    <div class="text-xs" style="color:#4b5563;" x-text="formatDate(t.timestamp||t.created_at)"></div>
+                  </div>
+                </template>
+              </div>
+            </template>
+            <template x-if="!selectedCustomer?.transitions || selectedCustomer.transitions.length===0">
+              <div class="rounded-xl p-6 text-center text-sm" style="background:#22263a;color:#4b5563;">Nessuna transizione registrata</div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const STAGE_LABELS = {
+  'stage_1_greet':'1. Saluto',
+  'stage_2_video':'2. Video VSL',
+  'stage_3_post_video':'3. Post Video',
+  'stage_4_answering_questions':'4. Domande',
+  'stage_5_booking':'5. Prenotazione',
+  'stage_6_verifying':'6. Verifica',
+  'stage_7_rescheduling':'7. Riprogrammazione',
+  'stage_8_postbooking':'8. Post-Booking',
+  'stage_9_uninterested':'9. Non Interessato',
+  'stage_10_budget_questioning':'10. Budget',
+};
+const STAGE_HEX = {
+  'stage_1_greet':'#3B82F6',
+  'stage_2_video':'#3B82F6',
+  'stage_3_post_video':'#6366F1',
+  'stage_4_answering_questions':'#6366F1',
+  'stage_5_booking':'#6366F1',
+  'stage_6_verifying':'#F59E0B',
+  'stage_7_rescheduling':'#10B981',
+  'stage_8_postbooking':'#10B981',
+  'stage_9_uninterested':'#EF4444',
+  'stage_10_budget_questioning':'#8B5CF6',
+};
+
+function dashboard() {
+  return {
+    view: 'dashboard',
+    customers: [],
+    funnel: {},
+    alerts: { assistance: [], lost_leads: [] },
+    metrics: [],
+    suggestions: [],
+    selectedCustomer: null,
+    searchQuery: '',
+    filterStage: '',
+    filterStatus: '',
+    filterCallBooked: false,
+    loading: false,
+    lastRefresh: null,
+    STAGE_LABELS,
+
+    navItems: [
+      { key:'dashboard', label:'Dashboard', icon:'<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" stroke-width="2"/><rect x="14" y="3" width="7" height="7" rx="1" stroke-width="2"/><rect x="3" y="14" width="7" height="7" rx="1" stroke-width="2"/><rect x="14" y="14" width="7" height="7" rx="1" stroke-width="2"/></svg>' },
+      { key:'clienti',   label:'Clienti',   icon:'<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>' },
+      { key:'metriche',  label:'Metriche',  icon:'<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>' },
+      { key:'sgw',       label:'Suggerimenti SGW', icon:'<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>' },
+    ],
+
+    profileFields: [
+      {key:'user_id',label:'User ID'},
+      {key:'stage',label:'Stage attuale'},
+      {key:'status',label:'Status'},
+      {key:'call_booked',label:'Call prenotata'},
+      {key:'turn_count',label:'Turni conv.'},
+      {key:'first_seen',label:'Prima visita'},
+      {key:'last_seen',label:'Ultima visita'},
+      {key:'last_reply_at',label:'Ultima risposta'},
+      {key:'conversation_stage',label:'Conv. stage'},
+      {key:'notes',label:'Note'},
+    ],
+
+    renderField(key, c) {
+      if (!c) return '—';
+      const v = c[key];
+      if (key === 'stage') {
+        if (!v) return '<span style="color:#4b5563">—</span>';
+        const col = STAGE_HEX[v] || '#9ca3af';
+        return `<span style="color:${col}">${STAGE_LABELS[v] || v}</span>`;
+      }
+      if (key === 'status') return v === 'LL' ? '<span style="color:#f87171">LL</span>' : (v ? `<span style="color:#d1d5db">${v}</span>` : '<span style="color:#4b5563">—</span>');
+      if (key === 'call_booked') return v ? '<span style="color:#4ade80">✓ Sì</span>' : '<span style="color:#4b5563">No</span>';
+      if (['first_seen','last_seen','last_reply_at'].includes(key)) return v ? this.formatDate(v) : '<span style="color:#4b5563">—</span>';
+      if (key === 'notes') return v ? `<span style="color:#9ca3af;font-size:0.75rem">${v}</span>` : '<span style="color:#4b5563">—</span>';
+      return v != null ? String(v) : '<span style="color:#4b5563">—</span>';
+    },
+
+    async init() { await this.loadAll(); },
+
+    async loadAll() {
+      this.loading = true;
+      try {
+        const [r0,r1,r2,r3,r4] = await Promise.allSettled([
+          fetch('/api/customers').then(r=>r.ok?r.json():[]),
+          fetch('/api/funnel').then(r=>r.ok?r.json():{}),
+          fetch('/api/alerts').then(r=>r.ok?r.json():{assistance:[],lost_leads:[]}),
+          fetch('/api/metrics').then(r=>r.ok?r.json():[]),
+          fetch('/api/stage-suggestions').then(r=>r.ok?r.json():[]),
+        ]);
+        this.customers   = r0.status==='fulfilled' ? (r0.value ?? []) : [];
+        this.funnel      = r1.status==='fulfilled' ? (r1.value ?? {}) : {};
+        this.alerts      = r2.status==='fulfilled' ? (r2.value ?? {assistance:[],lost_leads:[]}) : {assistance:[],lost_leads:[]};
+        this.metrics     = r3.status==='fulfilled' ? (Array.isArray(r3.value)?r3.value:[]) : [];
+        this.suggestions = r4.status==='fulfilled' ? (Array.isArray(r4.value)?r4.value:[]) : [];
+        this.lastRefresh = new Date().toISOString();
+      } catch(e) { console.error('loadAll:',e); }
+      finally { this.loading = false; }
+    },
+
+    get filteredCustomers() {
+      const q = this.searchQuery.toLowerCase().trim();
+      return this.customers.filter(c => {
+        if (q && !((c.first_name||'').toLowerCase().includes(q)||(c.username||'').toLowerCase().includes(q))) return false;
+        if (this.filterStage && c.stage !== this.filterStage) return false;
+        if (this.filterStatus === 'LL' && c.status !== 'LL') return false;
+        if (this.filterCallBooked && !c.call_booked) return false;
+        return true;
+      });
+    },
+
+    get kpiCards() {
+      const cs = this.customers;
+      return [
+        {label:'Totale Clienti',  value:cs.length,                                                              color:'#f9fafb', sub:'nel database'},
+        {label:'Attivi',          value:cs.filter(c=>c.status!=='LL'&&c.stage!=='stage_9_uninterested').length, color:'#4ade80', sub:'non LL / non stage 9'},
+        {label:'Call Prenotate',  value:cs.filter(c=>c.call_booked).length,                                     color:'#818cf8', sub:'call_booked = true'},
+        {label:'Lead Perse',      value:cs.filter(c=>c.status==='LL').length,                                   color:'#f87171', sub:'status = LL'},
+        {label:'Assistenza',      value:(this.alerts.assistance||[]).length,                                    color:'#fb923c', sub:'richieste recenti'},
+      ];
+    },
+
+    get funnelRows() {
+      if (Array.isArray(this.funnel)) return this.funnel;
+      const order = Object.keys(STAGE_LABELS);
+      return Object.entries(this.funnel)
+        .filter(([k])=>k.startsWith('stage_'))
+        .sort(([a],[b])=>{
+          const ia=order.indexOf(a), ib=order.indexOf(b);
+          return (ia===-1?99:ia)-(ib===-1?99:ib);
+        })
+        .map(([key,val])=>({key, count:typeof val==='object'?(val.count??val.total??0):(val??0)}));
+    },
+
+    get funnelMaxCount() { return Math.max(...this.funnelRows.map(r=>r.count),1); },
+
+    get allAlerts() {
+      const a = (this.alerts.assistance||[]).map(x=>({...x,type:'assistance_needed'}));
+      const l = (this.alerts.lost_leads||[]).map(x=>({...x,type:'lost'}));
+      return [...a,...l].sort((a,b)=>new Date(b.timestamp||b.last_seen||0)-new Date(a.timestamp||a.last_seen||0));
+    },
+
+    async openCustomer(userId) {
+      try {
+        const r = await fetch(`/api/customers/${userId}`);
+        this.selectedCustomer = r.ok ? await r.json() : (this.customers.find(c=>c.user_id==userId)||null);
+      } catch { this.selectedCustomer = this.customers.find(c=>c.user_id==userId)||null; }
+    },
+
+    async saveNote(userId, note) {
+      try { await fetch(`/api/customers/${userId}/notes`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({notes:note})}); }
+      catch(e){console.error('saveNote:',e);}
+    },
+
+    async saveStatus(userId, status) {
+      try { await fetch(`/api/customers/${userId}/status`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})}); }
+      catch(e){console.error('saveStatus:',e);}
+    },
+
+    formatDate(iso) {
+      if (!iso) return '—';
+      try {
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return String(iso);
+        const p = n=>String(n).padStart(2,'0');
+        return `${p(d.getDate())}/${p(d.getMonth()+1)}/${String(d.getFullYear()).slice(2)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+      } catch { return String(iso); }
+    },
+
+    stageLabel(key) { return STAGE_LABELS[key]||key||'—'; },
+    stageHexColor(key) { return STAGE_HEX[key]||'#6b7280'; },
+
+    advanceRateHex(rate) {
+      if (rate==null) return '#6b7280';
+      const n = parseFloat(rate); if(isNaN(n)) return '#6b7280';
+      const pct = n<=1 ? n*100 : n;
+      return pct>50 ? '#4ade80' : pct>25 ? '#fb923c' : '#f87171';
+    },
+
+    formatPct(val) {
+      if (val==null) return '—';
+      const n = parseFloat(val); if(isNaN(n)) return '—';
+      return (n<=1?n*100:n).toFixed(1)+'%';
+    },
+
+    formatDuration(sec) {
+      if (sec==null) return '—';
+      const s = parseFloat(sec); if(isNaN(s)) return '—';
+      return s<60 ? Math.round(s)+'s' : s<3600 ? Math.round(s/60)+'m' : (s/3600).toFixed(1)+'h';
+    },
+
+    sgwStatusStyle(status) {
+      return ({
+        pending:    'background:rgba(234,179,8,0.15);color:#facc15;',
+        approved:   'background:rgba(34,197,94,0.15);color:#4ade80;',
+        rejected:   'background:rgba(239,68,68,0.15);color:#f87171;',
+        active:     'background:rgba(59,130,246,0.15);color:#60a5fa;',
+        rolled_back:'background:rgba(107,114,128,0.15);color:#9ca3af;',
+      })[status] || 'background:rgba(107,114,128,0.15);color:#9ca3af;';
+    },
+  };
+}
+</script>
+</body>
+</html>

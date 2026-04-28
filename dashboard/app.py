@@ -1,0 +1,303 @@
+"""FastAPI dashboard backend for Telegram sales bot analytics."""
+
+import os
+import secrets
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
+from starlette.requests import Request
+from supabase import AsyncClient, acreate_client
+
+load_dotenv(Path(__file__).parent.parent / ".env")
+
+SUPABASE_URL: str = os.environ["SUPABASE_URL"]
+SUPABASE_KEY: str = os.environ["SUPABASE_KEY"]
+DASHBOARD_USER: str = os.getenv("DASHBOARD_USER", "admin")
+DASHBOARD_PASSWORD: str = os.environ["DASHBOARD_PASSWORD"]
+
+security = HTTPBasic()
+
+
+def require_auth(credentials: HTTPBasicCredentials = Depends(security)) -> str:
+    ok_user = secrets.compare_digest(
+        credentials.username.encode(), DASHBOARD_USER.encode()
+    )
+    ok_pass = secrets.compare_digest(
+        credentials.password.encode(), DASHBOARD_PASSWORD.encode()
+    )
+    if not (ok_user and ok_pass):
+        raise HTTPException(
+            status_code=401,
+            detail="Credenziali non valide",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
+
+
+_client: AsyncClient | None = None
+
+
+async def get_client() -> AsyncClient:
+    global _client
+    if _client is None:
+        _client = await acreate_client(SUPABASE_URL, SUPABASE_KEY)
+    return _client
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await get_client()
+    yield
+
+
+app = FastAPI(title="HM Dashboard", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:8050",
+        "http://127.0.0.1:3000",
+    ],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+
+
+# ---------------------------------------------------------------------------
+# Schemas
+# ---------------------------------------------------------------------------
+
+
+class NotesUpdate(BaseModel):
+    notes: str
+
+
+class StatusUpdate(BaseModel):
+    status: str
+
+
+# ---------------------------------------------------------------------------
+# Pages
+# ---------------------------------------------------------------------------
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request, _: str = Depends(require_auth)) -> HTMLResponse:
+    return templates.TemplateResponse(request=request, name="index.html")
+
+
+# ---------------------------------------------------------------------------
+# API endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/customers")
+async def list_customers(_: str = Depends(require_auth)):
+    try:
+        sb = await get_client()
+        res = await (
+            sb.table("customers")
+            .select(
+                "*, conversation_state(conversation_stage, turn_count, last_reply_at)"
+            )
+            .order("last_seen", desc=True)
+            .execute()
+        )
+        out = []
+        for row in res.data:
+            r = dict(row)
+            cs = r.pop("conversation_state", None) or {}
+            r["conversation_stage"] = cs.get("conversation_stage")
+            r["turn_count"] = cs.get("turn_count", 0)
+            r["last_reply_at"] = cs.get("last_reply_at")
+            out.append(r)
+        return out
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+@app.get("/api/customers/{user_id}")
+async def get_customer(user_id: int, _: str = Depends(require_auth)):
+    try:
+        sb = await get_client()
+        res = await (
+            sb.table("customers")
+            .select(
+                "*, conversation_state(conversation_stage, turn_count, last_reply_at)"
+            )
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        if res.data is None:
+            raise HTTPException(status_code=404, detail="Customer not found")
+        customer = dict(res.data)
+        cs = customer.pop("conversation_state", None) or {}
+        customer["conversation_stage"] = cs.get("conversation_stage")
+        customer["turn_count"] = cs.get("turn_count", 0)
+        customer["last_reply_at"] = cs.get("last_reply_at")
+
+        transitions = await (
+            sb.table("stage_transitions_log")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(20)
+            .execute()
+        )
+        return {"customer": customer, "transitions": transitions.data}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+@app.get("/api/funnel")
+async def funnel(_: str = Depends(require_auth)):
+    try:
+        sb = await get_client()
+        cs_res = (
+            await sb.table("conversation_state").select("conversation_stage").execute()
+        )
+        stage_counts: dict[str, int] = {}
+        for row in cs_res.data:
+            stage = row.get("conversation_stage") or "unknown"
+            stage_counts[stage] = stage_counts.get(stage, 0) + 1
+
+        cust_res = await sb.table("customers").select("call_booked, status").execute()
+        call_booked_count = sum(1 for r in cust_res.data if r.get("call_booked"))
+        status_counts: dict[str, int] = {}
+        for r in cust_res.data:
+            s = r.get("status") or "unknown"
+            status_counts[s] = status_counts.get(s, 0) + 1
+
+        return {
+            "stage_counts": stage_counts,
+            "call_booked_count": call_booked_count,
+            "status_counts": status_counts,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+@app.get("/api/alerts")
+async def alerts(_: str = Depends(require_auth)):
+    try:
+        sb = await get_client()
+        assist_res = await (
+            sb.table("stage_transitions_log")
+            .select("*")
+            .eq("assistance_needed", True)
+            .order("created_at", desc=True)
+            .limit(50)
+            .execute()
+        )
+        ll_res = await (
+            sb.table("customers")
+            .select("user_id, first_name, username, last_seen")
+            .eq("status", "LL")
+            .execute()
+        )
+        return {
+            "assistance_needed": assist_res.data,
+            "lost_leads": ll_res.data,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+@app.get("/api/metrics")
+async def metrics(_: str = Depends(require_auth)):
+    try:
+        sb = await get_client()
+        res = await (
+            sb.table("stage_metrics")
+            .select("*, stages(stage_key)")
+            .order("period_start", desc=True)
+            .execute()
+        )
+        out = []
+        for row in res.data:
+            r = dict(row)
+            stages_rel = r.pop("stages", None) or {}
+            r["stage_key"] = stages_rel.get("stage_key")
+            out.append(r)
+        return out
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+@app.get("/api/stage-suggestions")
+async def stage_suggestions(_: str = Depends(require_auth)):
+    try:
+        sb = await get_client()
+        res = await (
+            sb.table("stage_suggestions")
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(20)
+            .execute()
+        )
+        return res.data
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+@app.patch("/api/customers/{user_id}/notes")
+async def update_notes(user_id: int, body: NotesUpdate, _: str = Depends(require_auth)):
+    try:
+        sb = await get_client()
+        res = await (
+            sb.table("customers")
+            .update({"notes": body.notes})
+            .eq("user_id", user_id)
+            .execute()
+        )
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Customer not found")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+@app.patch("/api/customers/{user_id}/status")
+async def update_status(
+    user_id: int, body: StatusUpdate, _: str = Depends(require_auth)
+):
+    try:
+        sb = await get_client()
+        res = await (
+            sb.table("customers")
+            .update({"status": body.status})
+            .eq("user_id", user_id)
+            .execute()
+        )
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Customer not found")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
