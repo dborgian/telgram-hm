@@ -349,7 +349,26 @@ async def generate_reply(
         usage.completion_tokens,
     )
 
-    return response.choices[0].message.content.strip()
+    reply = response.choices[0].message.content.strip()
+
+    # Post-process: se il modello ha generato un placeholder invece dell'URL reale, sostituisci
+    import re
+
+    if stage == "stage_2_video" and vsl_link not in reply:
+        reply = re.sub(r"https?://\.{2,}", vsl_link, reply)
+        if vsl_link not in reply:
+            reply = reply.rstrip() + f"\n{vsl_link}"
+        logger.warning("LLM ha omesso vsl_link — iniettato manualmente in stage_2")
+
+    if stage in ("stage_5_booking", "stage_6_verifying") and calendly_link not in reply:
+        reply = re.sub(r"https?://\.{2,}", calendly_link, reply)
+        if calendly_link not in reply:
+            reply = reply.rstrip() + f"\n{calendly_link}"
+        logger.warning(
+            "LLM ha omesso calendly_link — iniettato manualmente in %s", stage
+        )
+
+    return reply
 
 
 # ---------------------------------------------------------------------------
