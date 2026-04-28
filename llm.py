@@ -257,11 +257,11 @@ async def classify_stage(
         stage = _DEFAULT_STAGE
 
     # Gate programmatico call_booked — replica logica n8n Code node
-    _post_booking_stages = {"stage_7_rescheduling", "stage_8_postbooking"}
-    if not call_booked and stage in _post_booking_stages:
-        stage = "stage_6_verifying"
-        logger.warning("Gate call_booked=False: stage forzato a stage_6_verifying")
-    if call_booked and stage not in _post_booking_stages:
+    # stage_7_rescheduling è valido con call_booked=False (l'utente ha cancellato e sta riprenotando)
+    if not call_booked and stage == "stage_8_postbooking":
+        stage = "stage_7_rescheduling"
+        logger.warning("Gate call_booked=False: stage_8 forzato a stage_7_rescheduling")
+    if call_booked and stage not in {"stage_7_rescheduling", "stage_8_postbooking"}:
         stage = "stage_8_postbooking"
         logger.warning("Gate call_booked=True: stage forzato a stage_8_postbooking")
 

@@ -76,8 +76,10 @@ async def _handle_calendly_webhook(request: web.Request) -> web.Response:
         )
     elif event_type == "invitee.canceled":
         await db.set_call_booked(user_id, False)
+        await db.update_stage(user_id, "stage_7_rescheduling")
         logger.info(
-            "call_booked=False impostato per user %d (cancellazione Calendly)", user_id
+            "call_booked=False + stage_7_rescheduling per user %d (cancellazione Calendly)",
+            user_id,
         )
 
     return web.Response(status=200, text="ok")
