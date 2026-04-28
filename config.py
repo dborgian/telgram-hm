@@ -32,8 +32,12 @@ UPSTASH_REDIS_URL: str = os.environ[
 PROFILE_CACHE_TTL: int = int(os.getenv("PROFILE_CACHE_TTL", "3600"))
 
 # Link VSL e Calendly (utm_source viene aggiunto dinamicamente con user_id)
-VSL_BASE_URL: str = "https://go.onlineperdonne.com/vsl-513194"
-CALENDLY_BASE_URL: str = "https://calendly.com/chat-manager/onlineconmary"
+VSL_BASE_URL: str = os.getenv(
+    "VSL_BASE_URL", "https://go.onlineperdonne.com/vsl-513194"
+)
+CALENDLY_BASE_URL: str = os.getenv(
+    "CALENDLY_BASE_URL", "https://calendly.com/chat-manager/onlineconmary"
+)
 
 # Notifiche interne — Telegram chat ID dove inviare alert (assistance_needed, DISENGAGE)
 # Lascia vuoto per disabilitare le notifiche
