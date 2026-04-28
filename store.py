@@ -7,6 +7,7 @@ Tabelle attese su Supabase (già esistenti in produzione):
   conversation_state — user_id, conversation_stage, turn_count, last_reply_at
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -17,6 +18,7 @@ import config
 logger = logging.getLogger(__name__)
 
 _client: AsyncClient | None = None
+_SUPABASE_BACKOFF = [0.5, 1.0, 2.0]
 
 
 async def get_client() -> AsyncClient:
@@ -30,6 +32,42 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _is_retryable(exc: Exception) -> bool:
+    """True for connection-type errors worth retrying."""
+    if isinstance(exc, (OSError, TimeoutError)):
+        return True
+    cls_name = type(exc).__name__.lower()
+    return any(
+        s in cls_name for s in ("connect", "timeout", "network", "socket", "read")
+    )
+
+
+async def _with_supabase_retry(op) -> object:
+    """Execute a Supabase operation, reinitialising the client on connection errors.
+    Initial attempt + up to 3 retries with backoff [0.5, 1.0, 2.0] seconds.
+    """
+    global _client
+    last_exc: Exception | None = None
+    for i in range(len(_SUPABASE_BACKOFF) + 1):
+        try:
+            sb = await get_client()
+            return await op(sb)
+        except Exception as exc:
+            if not _is_retryable(exc):
+                raise
+            logger.warning(
+                "Supabase connection error (attempt %d/%d): %s",
+                i + 1,
+                len(_SUPABASE_BACKOFF) + 1,
+                exc,
+            )
+            _client = None
+            last_exc = exc
+            if i < len(_SUPABASE_BACKOFF):
+                await asyncio.sleep(_SUPABASE_BACKOFF[i])
+    raise last_exc  # type: ignore[misc]
+
+
 # ---------------------------------------------------------------------------
 # Profilo cliente
 # ---------------------------------------------------------------------------
@@ -41,19 +79,15 @@ async def upsert_customer(
     username: str | None,
 ) -> None:
     """Crea il profilo se non esiste, aggiorna last_seen."""
-    sb = await get_client()
-    await (
-        sb.table("customers")
-        .upsert(
-            {
-                "user_id": user_id,
-                "first_name": first_name,
-                "username": username,
-                "last_seen": _now_iso(),
-            },
-            on_conflict="user_id",
-            ignore_duplicates=False,
-        )
+    payload = {
+        "user_id": user_id,
+        "first_name": first_name,
+        "username": username,
+        "last_seen": _now_iso(),
+    }
+    await _with_supabase_retry(
+        lambda sb: sb.table("customers")
+        .upsert(payload, on_conflict="user_id", ignore_duplicates=False)
         .execute()
     )
     logger.debug("upserted customer %d in Supabase", user_id)
@@ -61,9 +95,8 @@ async def upsert_customer(
 
 async def get_customer(user_id: int) -> dict | None:
     """Legge il profilo completo da Supabase (source of truth)."""
-    sb = await get_client()
-    res = (
-        await sb.table("customers")
+    res = await _with_supabase_retry(
+        lambda sb: sb.table("customers")
         .select("*, conversation_state(conversation_stage, turn_count)")
         .eq("user_id", user_id)
         .maybe_single()
@@ -82,12 +115,10 @@ async def get_customer(user_id: int) -> dict | None:
 
 async def update_stage(user_id: int, stage: str) -> None:
     """Aggiorna lo stage della conversazione."""
-    sb = await get_client()
-    await (
-        sb.table("conversation_state")
+    await _with_supabase_retry(
+        lambda sb: sb.table("conversation_state")
         .upsert(
-            {"user_id": user_id, "conversation_stage": stage},
-            on_conflict="user_id",
+            {"user_id": user_id, "conversation_stage": stage}, on_conflict="user_id"
         )
         .execute()
     )
@@ -109,15 +140,15 @@ async def increment_turn_count(user_id: int) -> None:
             last_reply_at = now();
         $$;
     """
-    sb = await get_client()
-    await sb.rpc("increment_turn_count", {"p_user_id": user_id}).execute()
+    await _with_supabase_retry(
+        lambda sb: sb.rpc("increment_turn_count", {"p_user_id": user_id}).execute()
+    )
 
 
 async def set_call_booked(user_id: int, booked: bool = True) -> None:
     """Imposta call_booked. Chiamato dal webhook Calendly o dai test."""
-    sb = await get_client()
-    await (
-        sb.table("customers")
+    await _with_supabase_retry(
+        lambda sb: sb.table("customers")
         .update({"call_booked": booked})
         .eq("user_id", user_id)
         .execute()
@@ -127,9 +158,8 @@ async def set_call_booked(user_id: int, booked: bool = True) -> None:
 
 async def set_lead_status(user_id: int, status: str) -> None:
     """Aggiorna il campo status del cliente su Supabase."""
-    sb = await get_client()
-    await (
-        sb.table("customers")
+    await _with_supabase_retry(
+        lambda sb: sb.table("customers")
         .update({"status": status})
         .eq("user_id", user_id)
         .execute()

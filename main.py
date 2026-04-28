@@ -1,4 +1,7 @@
 import asyncio
+import hashlib
+import hmac
+import json
 import logging
 from aiohttp import web
 
@@ -19,8 +22,34 @@ from processor import process_conversation
 
 async def _handle_calendly_webhook(request: web.Request) -> web.Response:
     """POST /webhook/calendly — aggiorna call_booked quando Calendly conferma una prenotazione."""
+    raw_body = await request.read()
+
+    # --- HMAC-SHA256 validation (FIX C-1) ---
+    if config.CALENDLY_WEBHOOK_SECRET:
+        sig_header = request.headers.get("Calendly-Webhook-Signature", "")
+        try:
+            parts = dict(part.split("=", 1) for part in sig_header.split(","))
+            timestamp = parts["t"]
+            received_sig = parts["v1"]
+        except (KeyError, ValueError):
+            logger.warning("Calendly webhook: header firma mancante o malformato")
+            return web.Response(status=401, text="firma non valida")
+        signing_payload = f"{timestamp}.".encode() + raw_body
+        expected_sig = hmac.new(
+            config.CALENDLY_WEBHOOK_SECRET.encode(),
+            signing_payload,
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(expected_sig, received_sig):
+            logger.warning("Calendly webhook: firma HMAC non valida")
+            return web.Response(status=401, text="firma non valida")
+    else:
+        logger.warning(
+            "CALENDLY_WEBHOOK_SECRET non configurato — validazione firma saltata"
+        )
+
     try:
-        payload = await request.json()
+        payload = json.loads(raw_body)
     except Exception:
         return web.Response(status=400, text="invalid json")
 
@@ -29,8 +58,11 @@ async def _handle_calendly_webhook(request: web.Request) -> web.Response:
         utm_source = payload["payload"]["tracking"]["utm_source"]
         user_id = int(utm_source)
     except (KeyError, TypeError, ValueError):
+        event_type = (
+            payload.get("event", "unknown") if isinstance(payload, dict) else "unknown"
+        )
         logger.warning(
-            "Calendly webhook: utm_source mancante o non valido: %s", payload
+            "Calendly webhook: utm_source mancante o non valido (event=%s)", event_type
         )
         return web.Response(status=400, text="utm_source mancante")
 

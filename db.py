@@ -7,8 +7,27 @@ Delega a:
 processor.py non cambia — chiama sempre db.xxx().
 """
 
+from typing import TypedDict
+
 import cache
 import store
+
+
+class HistoryTurn(TypedDict):
+    role: str  # "user" | "assistant"
+    content: str
+
+
+class CustomerProfile(TypedDict):
+    user_id: int
+    first_name: str | None
+    username: str | None
+    stage: str | None
+    call_booked: bool
+    status: str | None
+    notes: str | None
+    conversation_stage: str
+    turn_count: int
 
 
 async def init_db() -> None:

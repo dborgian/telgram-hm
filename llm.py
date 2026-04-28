@@ -1,6 +1,8 @@
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from openai import AsyncOpenAI, RateLimitError, APIError
+from models import CustomerProfile, HistoryTurn
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -114,6 +116,12 @@ _VALID_STAGES = set(STAGE_INSTRUCTIONS.keys())
 _DEFAULT_STAGE = "stage_1_greet"
 
 
+def _sanitize_user_input(text: str) -> str:
+    """Truncate and delimit user input to prevent prompt injection."""
+    truncated = text[:2000]
+    return f"<user_message>{truncated}</user_message>"
+
+
 def _build_vsl_link(user_id: int) -> str:
     return f"{config.VSL_BASE_URL}?utm_source={user_id}"
 
@@ -173,8 +181,8 @@ def _build_vsl_context(history: list[dict], call_booked: bool) -> tuple[str, str
     reraise=True,
 )
 async def classify_stage(
-    customer: dict | None,
-    history: list[dict],
+    customer: CustomerProfile | None,
+    history: list[HistoryTurn],
     new_message: str,
 ) -> tuple[str, bool]:
     """Classifica lo stage e rileva se serve assistenza umana.
@@ -199,7 +207,7 @@ async def classify_stage(
             profile_summary = "\n".join(parts) + "\n"
 
     history_text = (
-        "\n".join(f"{m['role'].upper()}: {m['content']}" for m in history[-6:])
+        "\n".join(f"{m['role'].upper()}: {m['content']}" for m in history)
         or "(nessuna storia)"
     )
 
@@ -208,7 +216,7 @@ async def classify_stage(
     prompt = (
         f"{profile_summary}"
         f"Ultimi messaggi:\n{history_text}\n"
-        f"Nuovo messaggio: {new_message}\n\n"
+        f"Nuovo messaggio: {_sanitize_user_input(new_message)}\n\n"
         f"Chiamata prenotata: {call_booked}\n\n"
         f"Classifica scegliendo tra:\n{stage_keys}\n\n"
         f"REGOLE stage:\n"
@@ -275,8 +283,8 @@ async def classify_stage(
     reraise=True,
 )
 async def generate_reply(
-    history: list[dict],
-    customer: dict | None,
+    history: list[HistoryTurn],
+    customer: CustomerProfile | None,
     new_message: str,
     stage: str = _DEFAULT_STAGE,
     user_id: int = 0,
@@ -287,7 +295,7 @@ async def generate_reply(
     calendly_link = _build_calendly_link(user_id)
 
     # Date per stage_5 e stage_7
-    now_rome = datetime.now(timezone(timedelta(hours=2)))  # Europe/Rome approssimato
+    now_rome = datetime.now(ZoneInfo("Europe/Rome"))
     today = now_rome.strftime("%-d %B %Y")
     tomorrow = (now_rome + timedelta(days=1)).strftime("%-d %B %Y")
 
@@ -321,10 +329,10 @@ async def generate_reply(
         if profile_parts:
             system_content += "\n\n# PROFILO CONTATTO\n" + "\n".join(profile_parts)
 
-    recent_history = history[-(config.MAX_HISTORY_TURNS * 2) :] if history else []
+    recent_history = history if history else []
     messages = [{"role": "system", "content": system_content}]
     messages.extend(recent_history)
-    messages.append({"role": "user", "content": new_message})
+    messages.append({"role": "user", "content": _sanitize_user_input(new_message)})
 
     response = await _client.chat.completions.create(
         model=_MODEL,
