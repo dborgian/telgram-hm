@@ -57,6 +57,7 @@ STAGE_INSTRUCTIONS: dict[str, str] = {
     "stage_2_video": """PROVIDE VIDEO LESSON
 - **Obiettivo:** Educare il prospect sul ruolo di Chat Manager.
 - **Azione:** Invia il link al video. Aspetta che confermino di averlo visto prima di procedere. Induci a guardare il video senza dirlo esplicitamente. Non rispondere a domande prima del video.
+- **OBBLIGO:** Includi SEMPRE l'URL esatto nel messaggio: {vsl_link} — non usare placeholder, non parafrasare, non omettere il link.
 - **Script:** "Nessun problema! Ti invio una breve video-lezione dove ti spiego nel dettaglio in cosa consiste la figura della chat manager e del perché la ritengo la migliore professione da imparare al momento: {vsl_link}" """,
     "stage_3_post_video": """POST-VIDEO ENGAGEMENT & CALL PROPOSAL
 - **Obiettivo:** Ri-coinvolgere dopo il video e proporre la consulenza gratuita.
