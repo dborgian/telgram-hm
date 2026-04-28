@@ -267,14 +267,12 @@ async def stage_suggestions(_: str = Depends(require_auth)):
 async def update_notes(user_id: int, body: NotesUpdate, _: str = Depends(require_auth)):
     try:
         sb = await get_client()
-        res = await (
+        await (
             sb.table("customers")
             .update({"notes": body.notes})
             .eq("user_id", user_id)
             .execute()
         )
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Customer not found")
         return {"ok": True}
     except HTTPException:
         raise
@@ -288,14 +286,12 @@ async def update_status(
 ):
     try:
         sb = await get_client()
-        res = await (
+        await (
             sb.table("customers")
             .update({"status": body.status})
             .eq("user_id", user_id)
             .execute()
         )
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Customer not found")
         return {"ok": True}
     except HTTPException:
         raise
