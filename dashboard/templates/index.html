@@ -569,13 +569,16 @@ function dashboard() {
     },
 
     async init() {
-      await this.loadAll();
-      // Re-render chart whenever user returns to dashboard view
+      // Watchers set up BEFORE loadAll so they fire when data arrives
+      this.$watch('convData', val => {
+        if (val && val.length) setTimeout(() => this.renderChart(), 50);
+      });
       this.$watch('view', val => {
         if (val === 'dashboard' && this.convData.length) {
           setTimeout(() => this.renderChart(), 50);
         }
       });
+      await this.loadAll();
     },
 
     async loadAll() {
@@ -598,8 +601,7 @@ function dashboard() {
           const rc = await fetch('/api/analytics/conversations');
           if (rc.ok) {
             this.convData = await rc.json();
-            // setTimeout ensures browser layout is complete before Chart.js renders
-            setTimeout(() => this.renderChart(), 150);
+            // chart is rendered by $watch('convData') set up in init()
           }
         } catch(e) { console.error('chart:', e); }
       } catch(e) { console.error('loadAll:',e); }
