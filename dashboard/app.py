@@ -3,6 +3,7 @@
 import os
 import secrets
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone, timedelta, date
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -21,6 +22,13 @@ SUPABASE_URL: str = os.environ["SUPABASE_URL"]
 SUPABASE_KEY: str = os.environ["SUPABASE_KEY"]
 DASHBOARD_USER: str = os.getenv("DASHBOARD_USER", "admin")
 DASHBOARD_PASSWORD: str = os.environ["DASHBOARD_PASSWORD"]
+
+HOT_STAGES = {
+    "stage_5_booking",
+    "stage_6_verifying",
+    "stage_7_rescheduling",
+    "stage_8_postbooking",
+}
 
 security = HTTPBasic()
 
@@ -103,6 +111,8 @@ async def index(request: Request, _: str = Depends(require_auth)) -> HTMLRespons
 
 @app.get("/api/customers")
 async def list_customers(_: str = Depends(require_auth)):
+    # NOTE: la colonna `user_summary` deve essere aggiunta alla tabella `customers` in Supabase:
+    # ALTER TABLE customers ADD COLUMN IF NOT EXISTS user_summary text;
     try:
         sb = await get_client()
         res = await (
@@ -120,6 +130,9 @@ async def list_customers(_: str = Depends(require_auth)):
             r["conversation_stage"] = cs.get("conversation_stage")
             r["turn_count"] = cs.get("turn_count", 0)
             r["last_reply_at"] = cs.get("last_reply_at")
+            r["hot_lead"] = bool(r.get("call_booked")) or (
+                r.get("conversation_stage") in HOT_STAGES
+            )
             out.append(r)
         return out
     except HTTPException:
@@ -148,6 +161,9 @@ async def get_customer(user_id: int, _: str = Depends(require_auth)):
         customer["conversation_stage"] = cs.get("conversation_stage")
         customer["turn_count"] = cs.get("turn_count", 0)
         customer["last_reply_at"] = cs.get("last_reply_at")
+        customer["hot_lead"] = bool(customer.get("call_booked")) or (
+            customer.get("conversation_stage") in HOT_STAGES
+        )
 
         transitions = await (
             sb.table("stage_transitions_log")
@@ -188,6 +204,38 @@ async def funnel(_: str = Depends(require_auth)):
             "call_booked_count": call_booked_count,
             "status_counts": status_counts,
         }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+@app.get("/api/analytics/conversations")
+async def analytics_conversations(_: str = Depends(require_auth)):
+    """Conversations per day (last 30 days) based on customers.first_seen."""
+    try:
+        sb = await get_client()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        res = await (
+            sb.table("customers")
+            .select("first_seen")
+            .gte("first_seen", cutoff)
+            .execute()
+        )
+        counts: dict[str, int] = {}
+        for row in res.data:
+            fs = row.get("first_seen")
+            if not fs:
+                continue
+            day = fs[:10]  # "YYYY-MM-DD"
+            counts[day] = counts.get(day, 0) + 1
+        # Fill missing days with 0 for last 30 days
+        today = date.today()
+        result = []
+        for i in range(30, -1, -1):
+            d = (today - timedelta(days=i)).isoformat()
+            result.append({"date": d, "count": counts.get(d, 0)})
+        return result
     except HTTPException:
         raise
     except Exception as exc:
