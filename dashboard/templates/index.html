@@ -61,7 +61,7 @@
   <main class="flex-1 overflow-y-auto scrollbar-thin" style="background:#0f1117;">
 
     <!-- DASHBOARD VIEW -->
-    <div x-show="view==='dashboard'" x-cloak>
+    <div x-show="view==='dashboard'">
       <div class="p-6 space-y-6">
         <h1 class="text-xl font-semibold text-white">Dashboard</h1>
         <!-- KPI Cards -->
@@ -122,7 +122,6 @@
             class="text-xs text-center py-2 mb-2" style="color:#6b7280;">
             Nessuna attività registrata negli ultimi 30 giorni
           </div>
-          <div class="text-xs mb-1" style="color:#ef4444;" x-text="chartDbg"></div>
           <div style="position:relative;height:180px;">
             <canvas id="convChart"></canvas>
           </div>
@@ -528,7 +527,7 @@ function dashboard() {
     lastRefresh: null,
     convChart: null,
     convData: [],
-    chartDbg: 'attesa dati...',
+    _chartPending: false,
     STAGE_LABELS,
 
     navItems: [
@@ -571,16 +570,24 @@ function dashboard() {
     },
 
     async init() {
-      // Watchers set up BEFORE loadAll so they fire when data arrives
+      // Watchers set up BEFORE loadAll so they fire when data arrives.
+      // scheduleChart() debounces via _chartPending to prevent concurrent renders.
       this.$watch('convData', val => {
-        if (val && val.length) setTimeout(() => this.renderChart(), 50);
+        if (val && val.length) this.scheduleChart();
       });
       this.$watch('view', val => {
-        if (val === 'dashboard' && this.convData.length) {
-          setTimeout(() => this.renderChart(), 50);
-        }
+        if (val === 'dashboard' && this.convData.length) this.scheduleChart();
       });
       await this.loadAll();
+    },
+
+    scheduleChart() {
+      if (this._chartPending) return; // already scheduled — drop duplicate
+      this._chartPending = true;
+      setTimeout(() => {
+        this._chartPending = false;
+        this.renderChart();
+      }, 50);
     },
 
     async loadAll() {
@@ -727,12 +734,19 @@ function dashboard() {
       })[status] || 'background:rgba(107,114,128,0.15);color:#9ca3af;';
     },
 
-    renderChart() {
+    renderChart(retry = 0) {
       const canvas = document.getElementById('convChart');
-      if (!canvas) { this.chartDbg = 'ERR: canvas non trovato'; return; }
-      if (canvas.offsetWidth === 0) { this.chartDbg = 'ERR: canvas width=0 h=' + canvas.offsetHeight; return; }
-      this.chartDbg = 'OK: ' + canvas.offsetWidth + 'x' + canvas.offsetHeight + ' pts=' + this.convData.length;
-      if (this.convChart) { this.convChart.destroy(); }
+      if (!canvas) return;
+      if (canvas.offsetWidth === 0) {
+        // Canvas not yet laid out (x-show still resolving). Retry up to 8×80ms.
+        // Each retry resets _chartPending so a new scheduleChart() can still fire.
+        if (retry < 8) {
+          this._chartPending = true;
+          setTimeout(() => { this._chartPending = false; this.renderChart(retry + 1); }, 80);
+        }
+        return;
+      }
+      if (this.convChart) { this.convChart.destroy(); this.convChart = null; }
       this.convChart = new Chart(canvas, {
         type: 'line',
         data: {
@@ -749,6 +763,7 @@ function dashboard() {
           }]
         },
         options: {
+          animation: { duration: 0 },
           responsive: true,
           maintainAspectRatio: false,
           plugins: { legend: { display: false } },

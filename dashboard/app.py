@@ -247,24 +247,31 @@ async def analytics_conversations(_: str = Depends(require_auth)):
 async def alerts(_: str = Depends(require_auth)):
     try:
         sb = await get_client()
-        assist_res = await (
-            sb.table("stage_transitions_log")
-            .select("*")
-            .eq("assistance_needed", True)
-            .order("created_at", desc=True)
-            .limit(50)
-            .execute()
-        )
-        ll_res = await (
-            sb.table("customers")
-            .select("user_id, first_name, username, last_seen")
-            .eq("status", "LL")
-            .execute()
-        )
-        return {
-            "assistance_needed": assist_res.data,
-            "lost_leads": ll_res.data,
-        }
+        assist_data: list = []
+        ll_data: list = []
+        try:
+            assist_res = await (
+                sb.table("stage_transitions_log")
+                .select("*")
+                .eq("assistance_needed", True)
+                .order("created_at", desc=True)
+                .limit(50)
+                .execute()
+            )
+            assist_data = assist_res.data or []
+        except Exception:
+            pass
+        try:
+            ll_res = await (
+                sb.table("customers")
+                .select("user_id, first_name, username, last_seen")
+                .eq("status", "LL")
+                .execute()
+            )
+            ll_data = ll_res.data or []
+        except Exception:
+            pass
+        return {"assistance_needed": assist_data, "lost_leads": ll_data}
     except HTTPException:
         raise
     except Exception as exc:
@@ -275,19 +282,22 @@ async def alerts(_: str = Depends(require_auth)):
 async def metrics(_: str = Depends(require_auth)):
     try:
         sb = await get_client()
-        res = await (
-            sb.table("stage_metrics")
-            .select("*, stages(stage_key)")
-            .order("period_start", desc=True)
-            .execute()
-        )
-        out = []
-        for row in res.data:
-            r = dict(row)
-            stages_rel = r.pop("stages", None) or {}
-            r["stage_key"] = stages_rel.get("stage_key")
-            out.append(r)
-        return out
+        try:
+            res = await (
+                sb.table("stage_metrics")
+                .select("*, stages(stage_key)")
+                .order("period_start", desc=True)
+                .execute()
+            )
+            out = []
+            for row in res.data or []:
+                r = dict(row)
+                stages_rel = r.pop("stages", None) or {}
+                r["stage_key"] = stages_rel.get("stage_key")
+                out.append(r)
+            return out
+        except Exception:
+            return []
     except HTTPException:
         raise
     except Exception as exc:
@@ -298,14 +308,17 @@ async def metrics(_: str = Depends(require_auth)):
 async def stage_suggestions(_: str = Depends(require_auth)):
     try:
         sb = await get_client()
-        res = await (
-            sb.table("stage_suggestions")
-            .select("*")
-            .order("created_at", desc=True)
-            .limit(20)
-            .execute()
-        )
-        return res.data
+        try:
+            res = await (
+                sb.table("stage_suggestions")
+                .select("*")
+                .order("created_at", desc=True)
+                .limit(20)
+                .execute()
+            )
+            return res.data or []
+        except Exception:
+            return []
     except HTTPException:
         raise
     except Exception as exc:
