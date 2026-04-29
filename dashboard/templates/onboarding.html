@@ -60,7 +60,8 @@
         <svg class="w-5 h-5 flex-shrink-0 mt-0.5" style="color:#4ade80;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
         <div>
           <p class="text-sm font-medium" style="color:#4ade80;">Cliente creato con successo!</p>
-          <a href="/" class="text-sm mt-1 inline-block" style="color:#86efac;">Torna alla dashboard →</a>
+          <p class="text-xs mt-1" style="color:#86efac;">Slug: <span x-text="createdSlug" class="font-mono"></span></p>
+          <a href="/" class="text-sm mt-2 inline-block" style="color:#86efac;">Torna alla dashboard →</a>
         </div>
       </div>
 
@@ -261,13 +262,14 @@ function onboarding() {
     previewLoading: false,
     submitLoading: false,
     success: false,
+    createdSlug: '',
     error: '',
 
     slugify(text) {
       return text.toLowerCase()
-        .replace(/[^\w\s-]/g, '')
-        .replace(/[\s_]+/g, '-')
-        .replace(/^-+|-+$/g, '')
+        .replace(/[^\w\s]/g, '')
+        .replace(/[\s]+/g, '_')
+        .replace(/^_+|_+$/g, '')
         .slice(0, 50);
     },
 
@@ -308,6 +310,7 @@ function onboarding() {
         if (!res.ok) {
           this.error = data.detail || 'Errore nella creazione del cliente.';
         } else {
+          this.createdSlug = data.slug || '';
           this.success = true;
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }
