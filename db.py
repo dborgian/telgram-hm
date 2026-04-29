@@ -160,8 +160,10 @@ def _dict_to_client_config(client_id: str, data: dict) -> "ClientConfig":
         stage_instructions=data.get("stage_instructions")
         or dict(_llm.STAGE_INSTRUCTIONS),
         llm_model=data.get("llm_model") or "gpt-4o-mini",
-        vsl_base_url=data.get("vsl_base_url") or "",
-        calendly_base_url=data.get("calendly_base_url") or "",
+        vsl_base_url=data.get("vsl_url") or data.get("vsl_base_url") or "",
+        calendly_base_url=data.get("calendly_url")
+        or data.get("calendly_base_url")
+        or "",
         vsl_domain=data.get("vsl_domain") or "go.onlineperdonne.com",
         cal_domain=data.get("cal_domain") or "calendly.com/chat-manager",
         default_stage=data.get("default_stage") or "stage_1_greet",

@@ -133,12 +133,14 @@ def _sanitize_user_input(text: str) -> str:
     return f"<user_message>{truncated}</user_message>"
 
 
-def _build_vsl_link(user_id: int) -> str:
-    return f"{config.VSL_BASE_URL}?utm_source={user_id}"
+def _build_vsl_link(user_id: int, cfg: "ClientConfig | None" = None) -> str:
+    base = (cfg.vsl_base_url if cfg else None) or config.VSL_BASE_URL
+    return f"{base}?utm_source={user_id}"
 
 
-def _build_calendly_link(user_id: int) -> str:
-    return f"{config.CALENDLY_BASE_URL}?utm_source={user_id}"
+def _build_calendly_link(user_id: int, cfg: "ClientConfig | None" = None) -> str:
+    base = (cfg.calendly_base_url if cfg else None) or config.CALENDLY_BASE_URL
+    return f"{base}?utm_source={user_id}"
 
 
 def _build_vsl_context(history: list[dict], call_booked: bool) -> tuple[str, str]:
@@ -316,8 +318,8 @@ async def generate_reply(
 ) -> str:
     """Genera la risposta per lo stage dato. Temperature=0.8 per naturalezza."""
     call_booked = bool((customer or {}).get("call_booked", False))
-    vsl_link = _build_vsl_link(user_id)
-    calendly_link = _build_calendly_link(user_id)
+    vsl_link = _build_vsl_link(user_id, cfg)
+    calendly_link = _build_calendly_link(user_id, cfg)
 
     # Date per stage_5 e stage_7
     now_rome = datetime.now(ZoneInfo("Europe/Rome"))
