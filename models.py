@@ -32,3 +32,4 @@ class ClientConfig:
     vsl_domain: str = "go.onlineperdonne.com"
     cal_domain: str = "calendly.com/chat-manager"
     default_stage: str = "stage_1_greet"
+    session_string: str = ""

@@ -129,6 +129,7 @@ class ClientUpdate(BaseModel):
     brand_voice: dict | None = None
     icp_rules: dict | None = None
     is_active: bool | None = None
+    session_string: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -469,11 +470,17 @@ async def list_clients(_: str = Depends(require_auth)):
         sb = await get_client()
         res = await (
             sb.table("client_config")
-            .select("client_id, name, slug, is_active, created_at")
+            .select("client_id, name, slug, is_active, created_at, session_string")
             .order("created_at", desc=True)
             .execute()
         )
-        return res.data
+        return [
+            {
+                **{k: v for k, v in row.items() if k != "session_string"},
+                "has_session": bool(row.get("session_string")),
+            }
+            for row in res.data
+        ]
     except HTTPException:
         raise
     except Exception as exc:

@@ -45,16 +45,20 @@ async def init_db() -> None:
     await store.get_client()
 
 
-async def get_history(user_id: int) -> list[dict]:
+async def get_history(user_id: int, client_id: str = "") -> list[dict]:
     """History da Redis — veloce, usata ad ogni turno."""
-    return await cache.get_history(user_id)
+    cid = client_id or config.DEFAULT_CLIENT_ID
+    return await cache.get_history(cid, user_id)
 
 
-async def save_turn(user_id: int, user_msg: str, assistant_msg: str) -> None:
+async def save_turn(
+    user_id: int, user_msg: str, assistant_msg: str, client_id: str = ""
+) -> None:
     """Salva il turno su Redis (history), incrementa contatore e persiste su Supabase."""
     import asyncio
 
-    await cache.save_turn(user_id, user_msg, assistant_msg)
+    cid = client_id or config.DEFAULT_CLIENT_ID
+    await cache.save_turn(cid, user_id, user_msg, assistant_msg)
     await asyncio.gather(
         store.increment_turn_count(user_id),
         store.save_message(user_id, "user", user_msg),
@@ -67,32 +71,36 @@ async def upsert_customer(
     user_id: int,
     first_name: str | None,
     username: str | None,
+    client_id: str = "",
 ) -> None:
     """Crea/aggiorna profilo su Supabase e invalida cache Redis."""
+    cid = client_id or config.DEFAULT_CLIENT_ID
     await store.upsert_customer(user_id, first_name, username)
-    await cache.invalidate_profile(user_id)
+    await cache.invalidate_profile(cid, user_id)
 
 
-async def get_customer(user_id: int) -> dict | None:
+async def get_customer(user_id: int, client_id: str = "") -> dict | None:
     """
     Legge profilo con cache-aside:
       1. Redis (veloce, TTL 1h)
       2. Se miss → Supabase → salva in Redis
     """
-    profile = await cache.get_cached_profile(user_id)
+    cid = client_id or config.DEFAULT_CLIENT_ID
+    profile = await cache.get_cached_profile(cid, user_id)
     if profile is not None:
         return profile
 
     profile = await store.get_customer(user_id)
     if profile is not None:
-        await cache.cache_profile(user_id, profile)
+        await cache.cache_profile(cid, user_id, profile)
     return profile
 
 
-async def update_stage(user_id: int, stage: str) -> None:
+async def update_stage(user_id: int, stage: str, client_id: str = "") -> None:
     """Aggiorna stage su Supabase e invalida cache Redis."""
+    cid = client_id or config.DEFAULT_CLIENT_ID
     await store.update_stage(user_id, stage)
-    await cache.invalidate_profile(user_id)
+    await cache.invalidate_profile(cid, user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -100,17 +108,21 @@ async def update_stage(user_id: int, stage: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def reset_user(user_id: int) -> None:
+async def reset_user(user_id: int, client_id: str = "") -> None:
     """Resetta history Redis e stage Supabase — utile per test."""
-    await cache.clear_history(user_id)
-    await cache.invalidate_profile(user_id)
+    cid = client_id or config.DEFAULT_CLIENT_ID
+    await cache.clear_history(cid, user_id)
+    await cache.invalidate_profile(cid, user_id)
     await store.update_stage(user_id, "stage_1_greet")
 
 
-async def set_call_booked(user_id: int, booked: bool = True) -> None:
+async def set_call_booked(
+    user_id: int, booked: bool = True, client_id: str = ""
+) -> None:
     """Simula una prenotazione Calendly senza toccare Calendly reale."""
+    cid = client_id or config.DEFAULT_CLIENT_ID
     await store.set_call_booked(user_id, booked)
-    await cache.invalidate_profile(user_id)
+    await cache.invalidate_profile(cid, user_id)
 
 
 async def set_lead_status(user_id: int, status: str) -> None:
@@ -118,16 +130,18 @@ async def set_lead_status(user_id: int, status: str) -> None:
     await store.set_lead_status(user_id, status)
 
 
-async def set_awaiting_reply(user_id: int, value: bool) -> None:
+async def set_awaiting_reply(user_id: int, value: bool, client_id: str = "") -> None:
     """Aggiorna awaiting_reply su Supabase e invalida cache Redis."""
+    cid = client_id or config.DEFAULT_CLIENT_ID
     await store.set_awaiting_reply(user_id, value)
-    await cache.invalidate_profile(user_id)
+    await cache.invalidate_profile(cid, user_id)
 
 
-async def set_hot_lead(user_id: int) -> None:
+async def set_hot_lead(user_id: int, client_id: str = "") -> None:
     """Marca il lead come hot su Supabase e invalida cache Redis."""
+    cid = client_id or config.DEFAULT_CLIENT_ID
     await store.set_hot_lead(user_id)
-    await cache.invalidate_profile(user_id)
+    await cache.invalidate_profile(cid, user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +165,7 @@ def _dict_to_client_config(client_id: str, data: dict) -> "ClientConfig":
         vsl_domain=data.get("vsl_domain") or "go.onlineperdonne.com",
         cal_domain=data.get("cal_domain") or "calendly.com/chat-manager",
         default_stage=data.get("default_stage") or "stage_1_greet",
+        session_string=data.get("session_string") or "",
     )
 
 
@@ -198,6 +213,31 @@ async def get_client_config(client_id: str) -> "ClientConfig":
         system_prompt_base=_llm.SYSTEM_PROMPT_BASE,
         stage_instructions=dict(_llm.STAGE_INSTRUCTIONS),
     )
+
+
+async def get_all_active_clients() -> list["ClientConfig"]:
+    """Return all active ClientConfig entries that have a session_string set.
+
+    Used by main.py to start one TelegramClient per client at boot.
+    Never raises — returns empty list on error.
+    """
+    from models import ClientConfig
+
+    try:
+        res = await store._with_supabase_retry(
+            lambda sb: sb.table("client_config")
+            .select("*")
+            .eq("is_active", True)
+            .not_.is_("session_string", "null")
+            .neq("session_string", "")
+            .execute()
+        )
+        return [
+            _dict_to_client_config(row["client_id"], row) for row in (res.data or [])
+        ]
+    except Exception:
+        logger.exception("get_all_active_clients failed")
+        return []
 
 
 async def invalidate_client_config(client_id: str) -> None:

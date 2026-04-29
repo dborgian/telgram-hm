@@ -13,6 +13,7 @@ import config
 import db
 import llm
 from db import init_db
+from models import ClientConfig
 from processor import process_conversation
 
 # ---------------------------------------------------------------------------
@@ -102,18 +103,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# user_id -> asyncio.Queue of (text, first_name, username)
-_queues: dict[int, asyncio.Queue] = {}
-# user_id -> running worker Task
-_workers: dict[int, asyncio.Task] = {}
-# dedup: set of message IDs already enqueued (max 500 entries)
-_seen_msg_ids: set[int] = set()
+# ---------------------------------------------------------------------------
+# Per-client state
+# ---------------------------------------------------------------------------
+_clients: dict[str, TelegramClient] = {}  # client_id -> TelegramClient
+_queues: dict[str, dict[int, asyncio.Queue]] = {}  # client_id -> {user_id -> Queue}
+_workers: dict[str, dict[int, asyncio.Task]] = {}  # client_id -> {user_id -> Task}
+_seen_msg_ids: set[int] = set()  # global dedup
 
 
 async def _user_worker(
     client: TelegramClient,
     user_id: int,
     queue: asyncio.Queue,
+    client_id: str,
 ) -> None:
     """Buffer messages per user, flush on timeout or MAX_MESSAGES."""
     buffer: list[str] = []
@@ -136,7 +139,7 @@ async def _user_worker(
                     first_name,
                     username,
                     combined,
-                    client_id=config.DEFAULT_CLIENT_ID,
+                    client_id=client_id,
                 )
         except asyncio.TimeoutError:
             if buffer:
@@ -151,7 +154,7 @@ async def _user_worker(
                     first_name,
                     username,
                     combined,
-                    client_id=config.DEFAULT_CLIENT_ID,
+                    client_id=client_id,
                 )
         except FloodWaitError as e:
             logger.warning(
@@ -162,18 +165,9 @@ async def _user_worker(
             logger.exception("Unhandled error in worker for user %d", user_id)
 
 
-async def main() -> None:
-    await init_db()
-    logger.info("Database initialised")
+def _make_handler(tg_client: TelegramClient, client_id: str):
+    """Returns a NewMessage handler closure bound to a specific client."""
 
-    client = TelegramClient(
-        StringSession(config.SESSION_STRING),
-        config.API_ID,
-        config.API_HASH,
-        flood_sleep_threshold=0,
-    )
-
-    @client.on(events.NewMessage(incoming=True))
     async def handle_new_message(event: events.NewMessage.Event) -> None:
         if not event.is_private:
             return
@@ -186,7 +180,7 @@ async def main() -> None:
         elif event.message.voice or event.message.audio:
             media = event.message.voice or event.message.audio
             try:
-                file_bytes = await client.download_media(media, bytes)
+                file_bytes = await tg_client.download_media(media, bytes)
                 transcribed = await llm.transcribe_audio(file_bytes)
                 text = f"[Vocale]: {transcribed}"
             except Exception:
@@ -194,7 +188,7 @@ async def main() -> None:
                 return
         elif event.message.photo:
             try:
-                file_bytes = await client.download_media(event.message.photo, bytes)
+                file_bytes = await tg_client.download_media(event.message.photo, bytes)
                 caption = event.message.text or ""
                 description = await llm.describe_image(file_bytes, caption)
                 text = f"[Immagine]: {description}"
@@ -222,38 +216,118 @@ async def main() -> None:
         first_name: str | None = getattr(sender, "first_name", None)
         username: str | None = getattr(sender, "username", None)
 
-        if sender_id not in _queues:
-            q: asyncio.Queue = asyncio.Queue()
-            _queues[sender_id] = q
-            task = asyncio.create_task(
-                _user_worker(client, sender_id, q),
-                name=f"worker-{sender_id}",
-            )
-            _workers[sender_id] = task
-            logger.debug("Spawned worker for user %d", sender_id)
+        client_queues = _queues[client_id]
+        client_workers = _workers[client_id]
 
-        await _queues[sender_id].put((text, first_name, username))
+        if sender_id not in client_queues:
+            q: asyncio.Queue = asyncio.Queue()
+            client_queues[sender_id] = q
+            task = asyncio.create_task(
+                _user_worker(tg_client, sender_id, q, client_id),
+                name=f"worker-{client_id[:8]}-{sender_id}",
+            )
+            client_workers[sender_id] = task
+            logger.debug(
+                "Spawned worker for user %d (client %s)", sender_id, client_id[:8]
+            )
+
+        await client_queues[sender_id].put((text, first_name, username))
         logger.info(
-            "Queued message from user %d (%d in buffer)",
+            "Queued message from user %d (%d in buffer) [client %s]",
             sender_id,
-            _queues[sender_id].qsize(),
+            client_queues[sender_id].qsize(),
+            client_id[:8],
         )
 
+    return handle_new_message
+
+
+async def _start_telegram_client(cfg: ClientConfig) -> None:
+    """Start a TelegramClient for a single client config."""
+    if not cfg.session_string:
+        logger.warning("Skipping client_id=%s — no session_string", cfg.client_id)
+        return
+    client = TelegramClient(
+        StringSession(cfg.session_string),
+        config.API_ID,
+        config.API_HASH,
+        flood_sleep_threshold=0,
+    )
+    _queues[cfg.client_id] = {}
+    _workers[cfg.client_id] = {}
+    handler = _make_handler(client, cfg.client_id)
+    client.add_event_handler(handler, events.NewMessage(incoming=True))
+    await client.start()
+    _clients[cfg.client_id] = client
+    logger.info("Started TelegramClient for client_id=%s", cfg.client_id)
+
+
+async def _poll_new_clients() -> None:
+    """Poll Supabase every 60s for new active clients and start their TelegramClients."""
+    while True:
+        await asyncio.sleep(60)
+        try:
+            all_cfgs = await db.get_all_active_clients()
+            for cfg in all_cfgs:
+                if cfg.client_id not in _clients:
+                    logger.info("New client detected: %s — starting", cfg.client_id)
+                    await _start_telegram_client(cfg)
+        except Exception:
+            logger.exception("Error in _poll_new_clients")
+
+
+async def main() -> None:
+    await init_db()
+    logger.info("Database initialised")
+
+    # Start webhook server
     webhook_runner = await _start_webhook_server()
 
-    await client.start()
-    logger.info("Userbot connected and listening")
-    try:
-        await client.run_until_disconnected()
-    finally:
+    # Load and start all active clients
+    all_cfgs = await db.get_all_active_clients()
+    if not all_cfgs:
+        logger.warning(
+            "No active clients with session_string found — starting with DEFAULT_CLIENT_ID fallback"
+        )
+        fallback_cfg = ClientConfig(
+            client_id=config.DEFAULT_CLIENT_ID,
+            system_prompt_base="",
+            stage_instructions={},
+            session_string=config.SESSION_STRING,
+        )
+        all_cfgs = [fallback_cfg]
+
+    for cfg in all_cfgs:
+        await _start_telegram_client(cfg)
+
+    if not _clients:
+        logger.error(
+            "No TelegramClients started — check session_string in client_config or SESSION_STRING env var"
+        )
         await webhook_runner.cleanup()
-        logger.info("Webhook server fermato")
-        logger.info("Shutting down — cancelling %d worker task(s)", len(_workers))
-        for task in _workers.values():
-            task.cancel()
-        if _workers:
-            await asyncio.gather(*_workers.values(), return_exceptions=True)
-        logger.info("All worker tasks cancelled")
+        return
+
+    logger.info("Started %d TelegramClient(s)", len(_clients))
+
+    # Run polling + all clients
+    poll_task = asyncio.create_task(_poll_new_clients(), name="poll-new-clients")
+
+    try:
+        await asyncio.gather(*[c.run_until_disconnected() for c in _clients.values()])
+    finally:
+        poll_task.cancel()
+        await webhook_runner.cleanup()
+        # Cancel all workers
+        for client_workers in _workers.values():
+            for task in client_workers.values():
+                task.cancel()
+        all_worker_tasks = [t for cw in _workers.values() for t in cw.values()]
+        if all_worker_tasks:
+            await asyncio.gather(*all_worker_tasks, return_exceptions=True)
+        # Disconnect all clients
+        for client in _clients.values():
+            await client.disconnect()
+        logger.info("Shutdown complete")
 
 
 if __name__ == "__main__":

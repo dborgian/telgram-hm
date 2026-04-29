@@ -78,9 +78,13 @@ async def process_conversation(
     try:
         effective_client_id = client_id or config.DEFAULT_CLIENT_ID
         cfg = await db.get_client_config(effective_client_id)
-        await db.upsert_customer(user_id, first_name, username)
+        await db.upsert_customer(
+            user_id, first_name, username, client_id=effective_client_id
+        )
         # Reset awaiting_reply: l'utente ha risposto
-        _f = asyncio.ensure_future(db.set_awaiting_reply(user_id, False))
+        _f = asyncio.ensure_future(
+            db.set_awaiting_reply(user_id, False, client_id=effective_client_id)
+        )
         _f.add_done_callback(
             lambda f: (
                 logger.warning("set_awaiting_reply(False) error: %s", f.exception())
@@ -88,8 +92,8 @@ async def process_conversation(
                 else None
             )
         )
-        history = await db.get_history(user_id)
-        customer = await db.get_customer(user_id)
+        history = await db.get_history(user_id, client_id=effective_client_id)
+        customer = await db.get_customer(user_id, client_id=effective_client_id)
         ctx_history = history[-_HISTORY_CONTEXT:]
         # Step 1: classifica stage (temp=0.0, veloce)
         stage, assistance_needed = await llm.classify_stage(
@@ -115,13 +119,13 @@ async def process_conversation(
                 )
                 stage = current_stage
 
-        await db.update_stage(user_id, stage)
+        await db.update_stage(user_id, stage, client_id=effective_client_id)
 
         # Hot signal detection: rileva segnali di close ad alta probabilità
         if not assistance_needed and any(
             _re.search(p, combined_text, _re.IGNORECASE) for p in _HOT_SIGNAL_PATTERNS
         ):
-            await db.set_hot_lead(user_id)
+            await db.set_hot_lead(user_id, client_id=effective_client_id)
             await notifier.notify_alert(
                 client,
                 user_id,
@@ -138,7 +142,12 @@ async def process_conversation(
                 "assistance_needed=True per user %d — nessuna risposta AI inviata",
                 user_id,
             )
-            await db.save_turn(user_id, combined_text, "[ASSISTANCE_NEEDED]")
+            await db.save_turn(
+                user_id,
+                combined_text,
+                "[ASSISTANCE_NEEDED]",
+                client_id=effective_client_id,
+            )
             await notifier.notify_alert(
                 client,
                 user_id,
@@ -158,7 +167,9 @@ async def process_conversation(
         # DISENGAGE: il modello segnala di chiudere la conversazione — non inviare nulla
         if reply.strip().upper() == "DISENGAGE":
             logger.info("DISENGAGE per user %d — nessuna risposta inviata", user_id)
-            await db.save_turn(user_id, combined_text, "[DISENGAGE]")
+            await db.save_turn(
+                user_id, combined_text, "[DISENGAGE]", client_id=effective_client_id
+            )
             await db.set_lead_status(user_id, "LL")
             await notifier.notify_alert(
                 client,
@@ -170,7 +181,7 @@ async def process_conversation(
             )
             return
 
-        await db.save_turn(user_id, combined_text, reply)
+        await db.save_turn(user_id, combined_text, reply, client_id=effective_client_id)
 
         # stage_9: attendi 45s prima di inviare (replica n8n Wait node)
         if stage == "stage_9_uninterested":
@@ -184,7 +195,9 @@ async def process_conversation(
                 await asyncio.sleep(delay)
             await client.send_message(user_id, chunk)
         # Traccia che il bot ha inviato e sta aspettando risposta
-        _g = asyncio.ensure_future(db.set_awaiting_reply(user_id, True))
+        _g = asyncio.ensure_future(
+            db.set_awaiting_reply(user_id, True, client_id=effective_client_id)
+        )
         _g.add_done_callback(
             lambda f: (
                 logger.warning("set_awaiting_reply(True) error: %s", f.exception())
