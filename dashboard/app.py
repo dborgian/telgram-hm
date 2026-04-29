@@ -1,7 +1,9 @@
 """FastAPI dashboard backend for Telegram sales bot analytics."""
 
 import os
+import re
 import secrets
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta, date
 from pathlib import Path
@@ -15,6 +17,11 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.requests import Request
 from supabase import AsyncClient, acreate_client
+
+try:
+    from dashboard.prompt_generator import generate_client_config
+except ImportError:
+    from prompt_generator import generate_client_config
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -92,6 +99,58 @@ class NotesUpdate(BaseModel):
 
 class StatusUpdate(BaseModel):
     status: str
+
+
+class ClientCreate(BaseModel):
+    name: str
+    slug: str = ""
+    coach_name: str = ""
+    specialization: str = ""
+    target_description: str = ""
+    tone: str = "warm"
+    offer_description: str = ""
+    price_display: str = ""
+    budget_min_euros: int = 0
+    guardrails: str = ""
+    vsl_url: str = ""
+    calendly_url: str = ""
+
+
+class ClientPreview(ClientCreate):
+    pass
+
+
+class ClientUpdate(BaseModel):
+    name: str | None = None
+    coach_name: str | None = None
+    specialization: str | None = None
+    target_description: str | None = None
+    tone: str | None = None
+    offer_description: str | None = None
+    price_display: str | None = None
+    budget_min_euros: int | None = None
+    guardrails: str | None = None
+    vsl_url: str | None = None
+    calendly_url: str | None = None
+    is_active: bool | None = None
+
+
+class ClientUpdate(BaseModel):
+    name: str | None = None
+    coach_name: str | None = None
+    specialization: str | None = None
+    target_description: str | None = None
+    tone: str | None = None
+    offer_description: str | None = None
+    price_display: str | None = None
+    budget_min_euros: int | None = None
+    guardrails: str | None = None
+    vsl_url: str | None = None
+    calendly_url: str | None = None
+    system_prompt_base: str | None = None
+    stage_instructions: dict | None = None
+    brand_voice: dict | None = None
+    is_active: bool | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +445,113 @@ async def update_status(
             .eq("user_id", user_id)
             .execute()
         )
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+# ---------------------------------------------------------------------------
+# Fase 2 — Prompt Generator / Client Management
+# ---------------------------------------------------------------------------
+
+
+def _slugify(text: str) -> str:
+    text = text.lower().strip()
+    text = re.sub(r"[^\w\s-]", "", text)
+    text = re.sub(r"[\s_-]+", "-", text)
+    return text[:50]
+
+
+@app.get("/onboarding", response_class=HTMLResponse)
+async def onboarding_page(request: Request, _: str = Depends(require_auth)):
+    return templates.TemplateResponse(request=request, name="onboarding.html")
+
+
+@app.post("/api/clients/preview")
+async def preview_client(body: ClientPreview, _: str = Depends(require_auth)):
+    try:
+        form_data = body.model_dump()
+        result = await generate_client_config(form_data)
+        return {"system_prompt_base": result.get("system_prompt_base", ""), "ok": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+@app.get("/api/clients")
+async def list_clients(_: str = Depends(require_auth)):
+    try:
+        sb = await get_client()
+        res = await (
+            sb.table("client_config")
+            .select("client_id, name, slug, is_active, created_at")
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return res.data
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+@app.post("/api/clients", status_code=201)
+async def create_client(body: ClientCreate, _: str = Depends(require_auth)):
+    try:
+        slug = body.slug or _slugify(body.name)
+
+        form_data = body.model_dump()
+        generated = await generate_client_config(form_data)
+
+        client_id = str(uuid.uuid4())
+        row = {
+            "client_id": client_id,
+            "name": body.name,
+            "slug": slug,
+            "coach_name": body.coach_name,
+            "specialization": body.specialization,
+            "target_description": body.target_description,
+            "tone": body.tone,
+            "offer_description": body.offer_description,
+            "price_display": body.price_display,
+            "budget_min_euros": body.budget_min_euros,
+            "guardrails": body.guardrails,
+            "vsl_base_url": body.vsl_url,
+            "calendly_base_url": body.calendly_url,
+            "system_prompt_base": generated.get("system_prompt_base", ""),
+            "stage_instructions": generated.get("stage_instructions", {}),
+            "brand_voice": generated.get("brand_voice", {}),
+            "is_active": True,
+        }
+
+        sb = await get_client()
+        try:
+            await sb.table("client_config").insert(row).execute()
+        except Exception as e:
+            if "duplicate" in str(e).lower() or "unique" in str(e).lower():
+                raise HTTPException(status_code=409, detail="slug già esistente") from e
+            raise
+
+        return {"client_id": client_id, "slug": slug, "ok": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+@app.patch("/api/clients/{slug}")
+async def update_client(slug: str, body: ClientUpdate, _: str = Depends(require_auth)):
+    try:
+        updates = body.model_dump(exclude_unset=True)
+        if not updates:
+            return {"ok": True}
+        sb = await get_client()
+        res = await sb.table("client_config").update(updates).eq("slug", slug).execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Client not found")
         return {"ok": True}
     except HTTPException:
         raise

@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="it" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nuovo Cliente — HM Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    body { background-color: #0f1117; color: #f3f4f6; }
+    .scrollbar-thin::-webkit-scrollbar { width: 4px; height: 4px; }
+    .scrollbar-thin::-webkit-scrollbar-track { background: #1a1d27; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #3d4260; border-radius: 2px; }
+  </style>
+</head>
+<body class="h-full" x-data="onboarding()">
+
+<div class="flex h-screen overflow-hidden">
+
+  <!-- SIDEBAR -->
+  <aside class="w-[220px] flex-shrink-0 flex flex-col" style="background:#1a1d27;border-right:1px solid #2d3248;">
+    <div class="px-5 py-5" style="border-bottom:1px solid #2d3248;">
+      <a href="/" class="flex items-center gap-2.5 no-underline">
+        <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-sm" style="background:#4f46e5;">HM</div>
+        <span class="font-semibold text-white text-sm tracking-wide">HM Dashboard</span>
+      </a>
+    </div>
+    <nav class="flex-1 px-3 py-4 space-y-1">
+      <a href="/"
+        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all no-underline"
+        style="color:#9ca3af;border:1px solid transparent;"
+        onmouseover="this.style.background='#22263a'" onmouseleave="this.style.background=''">
+        <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" stroke-width="2"/><rect x="14" y="3" width="7" height="7" rx="1" stroke-width="2"/><rect x="3" y="14" width="7" height="7" rx="1" stroke-width="2"/><rect x="14" y="14" width="7" height="7" rx="1" stroke-width="2"/></svg>
+        <span>Dashboard</span>
+      </a>
+      <a href="/onboarding"
+        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all no-underline"
+        style="background:rgba(79,70,229,0.15);color:#818cf8;border:1px solid rgba(79,70,229,0.3);">
+        <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        <span>Nuovo Cliente</span>
+      </a>
+    </nav>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="flex-1 overflow-y-auto scrollbar-thin" style="background:#0f1117;">
+    <div class="max-w-2xl mx-auto px-6 py-8 space-y-6">
+
+      <!-- Header -->
+      <div>
+        <h1 class="text-xl font-semibold text-white">Nuovo Cliente</h1>
+        <p class="mt-1 text-sm" style="color:#6b7280;">Configura un nuovo bot personalizzato</p>
+      </div>
+
+      <!-- Success message -->
+      <div x-show="success" x-cloak
+        class="rounded-xl px-5 py-4 flex items-start gap-3"
+        style="background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.25);">
+        <svg class="w-5 h-5 flex-shrink-0 mt-0.5" style="color:#4ade80;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        <div>
+          <p class="text-sm font-medium" style="color:#4ade80;">Cliente creato con successo!</p>
+          <a href="/" class="text-sm mt-1 inline-block" style="color:#86efac;">Torna alla dashboard →</a>
+        </div>
+      </div>
+
+      <!-- Error message -->
+      <div x-show="error" x-cloak
+        class="rounded-xl px-5 py-4 flex items-start gap-3"
+        style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);">
+        <svg class="w-5 h-5 flex-shrink-0 mt-0.5" style="color:#f87171;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <p class="text-sm" style="color:#f87171;" x-text="error"></p>
+      </div>
+
+      <form @submit.prevent="submitForm()" class="space-y-5" x-show="!success">
+
+        <!-- Section 1: Identità -->
+        <div class="rounded-xl p-5 space-y-4" style="background:#1a1d27;border:1px solid #2d3248;">
+          <h2 class="text-sm font-semibold uppercase tracking-wider" style="color:#6b7280;">1 — Identità</h2>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="space-y-1.5">
+              <label class="text-xs font-medium" style="color:#9ca3af;">Nome cliente <span style="color:#ef4444;">*</span></label>
+              <input type="text" x-model="form.name" @input="if(!slugManual) form.slug = slugify(form.name)" required
+                class="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2"
+                style="background:#0f1117;border:1px solid #2d3248;color:#f3f4f6;"
+                placeholder="es. ReaverMarketing" />
+            </div>
+            <div class="space-y-1.5">
+              <label class="text-xs font-medium" style="color:#9ca3af;">Slug</label>
+              <input type="text" x-model="form.slug" @input="slugManual = true"
+                class="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2"
+                style="background:#0f1117;border:1px solid #2d3248;color:#f3f4f6;"
+                placeholder="es. reavermarketing" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="space-y-1.5">
+              <label class="text-xs font-medium" style="color:#9ca3af;">Nome persona AI / coach</label>
+              <input type="text" x-model="form.coach_name"
+                class="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2"
+                style="background:#0f1117;border:1px solid #2d3248;color:#f3f4f6;"
+                placeholder="es. Mary" />
+            </div>
+            <div class="space-y-1.5">
+              <label class="text-xs font-medium" style="color:#9ca3af;">Specializzazione</label>
+              <input type="text" x-model="form.specialization"
+                class="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2"
+                style="background:#0f1117;border:1px solid #2d3248;color:#f3f4f6;"
+                placeholder="es. Chat Manager online" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 2: Target & Offerta -->
+        <div class="rounded-xl p-5 space-y-4" style="background:#1a1d27;border:1px solid #2d3248;">
+          <h2 class="text-sm font-semibold uppercase tracking-wider" style="color:#6b7280;">2 — Target & Offerta</h2>
+
+          <div class="space-y-1.5">
+            <label class="text-xs font-medium" style="color:#9ca3af;">Descrizione ICP / target</label>
+            <textarea x-model="form.target_description" rows="3"
+              class="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 resize-none"
+              style="background:#0f1117;border:1px solid #2d3248;color:#f3f4f6;"
+              placeholder="Chi è il cliente ideale? Età, professione, problema principale..."></textarea>
+          </div>
+
+          <div class="space-y-1.5">
+            <label class="text-xs font-medium" style="color:#9ca3af;">Descrizione offerta</label>
+            <textarea x-model="form.offer_description" rows="3"
+              class="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 resize-none"
+              style="background:#0f1117;border:1px solid #2d3248;color:#f3f4f6;"
+              placeholder="Cosa viene venduto? Risultati promessi, durata, formato..."></textarea>
+          </div>
+
+          <div class="grid grid-cols-3 gap-4">
+            <div class="space-y-1.5">
+              <label class="text-xs font-medium" style="color:#9ca3af;">Prezzo visualizzato</label>
+              <input type="text" x-model="form.price_display"
+                class="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2"
+                style="background:#0f1117;border:1px solid #2d3248;color:#f3f4f6;"
+                placeholder="es. da €1.500" />
+            </div>
+            <div class="space-y-1.5">
+              <label class="text-xs font-medium" style="color:#9ca3af;">Budget minimo (€)</label>
+              <input type="number" x-model.number="form.budget_min_euros" min="0"
+                class="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2"
+                style="background:#0f1117;border:1px solid #2d3248;color:#f3f4f6;"
+                placeholder="150" />
+            </div>
+            <div class="space-y-1.5">
+              <label class="text-xs font-medium" style="color:#9ca3af;">Tone of voice</label>
+              <select x-model="form.tone"
+                class="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2"
+                style="background:#0f1117;border:1px solid #2d3248;color:#f3f4f6;">
+                <option value="warm">Caldo</option>
+                <option value="professional">Professionale</option>
+                <option value="urgent">Urgente</option>
+                <option value="empathetic">Empatico</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 3: Link & Guardrail -->
+        <div class="rounded-xl p-5 space-y-4" style="background:#1a1d27;border:1px solid #2d3248;">
+          <h2 class="text-sm font-semibold uppercase tracking-wider" style="color:#6b7280;">3 — Link & Guardrail</h2>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="space-y-1.5">
+              <label class="text-xs font-medium" style="color:#9ca3af;">VSL URL</label>
+              <input type="url" x-model="form.vsl_url"
+                class="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2"
+                style="background:#0f1117;border:1px solid #2d3248;color:#f3f4f6;"
+                placeholder="https://..." />
+            </div>
+            <div class="space-y-1.5">
+              <label class="text-xs font-medium" style="color:#9ca3af;">Calendly URL</label>
+              <input type="url" x-model="form.calendly_url"
+                class="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2"
+                style="background:#0f1117;border:1px solid #2d3248;color:#f3f4f6;"
+                placeholder="https://calendly.com/..." />
+            </div>
+          </div>
+
+          <div class="space-y-1.5">
+            <label class="text-xs font-medium" style="color:#9ca3af;">Guardrail</label>
+            <textarea x-model="form.guardrails" rows="3"
+              class="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 resize-none"
+              style="background:#0f1117;border:1px solid #2d3248;color:#f3f4f6;"
+              placeholder="Es. Non dare consigli medici. Non nominare competitor."></textarea>
+          </div>
+        </div>
+
+        <!-- Preview Prompt -->
+        <div class="space-y-3">
+          <button type="button" @click="generatePreview()" :disabled="previewLoading"
+            class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all"
+            style="background:#22263a;border:1px solid #2d3248;color:#9ca3af;"
+            onmouseover="if(!this.disabled) this.style.borderColor='#4f46e5';if(!this.disabled) this.style.color='#818cf8'"
+            onmouseleave="this.style.borderColor='#2d3248';this.style.color='#9ca3af'">
+            <svg x-show="!previewLoading" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+            <svg x-show="previewLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/></svg>
+            <span x-text="previewLoading ? 'Generazione...' : 'Anteprima Prompt'"></span>
+          </button>
+
+          <div x-show="preview" x-cloak x-data="{open:true}">
+            <button type="button" @click="open=!open"
+              class="flex items-center gap-1.5 text-xs mb-2" style="color:#6b7280;"
+              onmouseover="this.style.color='#9ca3af'" onmouseleave="this.style.color='#6b7280'">
+              <svg class="w-3 h-3 transition-transform" :class="open?'rotate-90':''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+              <span x-text="open ? 'Nascondi anteprima' : 'Mostra anteprima'"></span>
+            </button>
+            <pre x-show="open" x-cloak
+              class="rounded-xl p-4 text-xs leading-relaxed overflow-x-auto scrollbar-thin whitespace-pre-wrap break-words"
+              style="background:#1a1d27;border:1px solid #2d3248;color:#9ca3af;max-height:320px;overflow-y:auto;"
+              x-text="preview"></pre>
+          </div>
+        </div>
+
+        <!-- Submit -->
+        <div class="flex items-center gap-4 pb-8">
+          <button type="submit" :disabled="submitLoading"
+            class="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all"
+            style="background:#4f46e5;color:white;"
+            onmouseover="if(!this.disabled) this.style.background='#4338ca'"
+            onmouseleave="if(!this.disabled) this.style.background='#4f46e5'">
+            <svg x-show="!submitLoading" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            <svg x-show="submitLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/></svg>
+            <span x-text="submitLoading ? 'Creazione...' : 'Crea Cliente'"></span>
+          </button>
+          <a href="/" class="text-sm" style="color:#6b7280;"
+            onmouseover="this.style.color='#9ca3af'" onmouseleave="this.style.color='#6b7280'">Annulla</a>
+        </div>
+
+      </form>
+
+    </div>
+  </main>
+</div>
+
+<script>
+function onboarding() {
+  return {
+    form: {
+      name: '',
+      slug: '',
+      coach_name: '',
+      specialization: '',
+      target_description: '',
+      tone: 'warm',
+      offer_description: '',
+      price_display: '',
+      budget_min_euros: 0,
+      guardrails: '',
+      vsl_url: '',
+      calendly_url: '',
+    },
+    slugManual: false,
+    preview: '',
+    previewLoading: false,
+    submitLoading: false,
+    success: false,
+    error: '',
+
+    slugify(text) {
+      return text.toLowerCase()
+        .replace(/[^\w\s-]/g, '')
+        .replace(/[\s_]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 50);
+    },
+
+    async generatePreview() {
+      this.previewLoading = true;
+      this.error = '';
+      try {
+        const res = await fetch('/api/clients/preview', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.form),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          this.error = data.detail || 'Errore nella generazione del prompt.';
+        } else {
+          this.preview = data.system_prompt_base || data.preview || JSON.stringify(data, null, 2);
+        }
+      } catch (e) {
+        this.error = 'Errore di rete: ' + e.message;
+      } finally {
+        this.previewLoading = false;
+      }
+    },
+
+    async submitForm() {
+      this.submitLoading = true;
+      this.error = '';
+      try {
+        const res = await fetch('/api/clients', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.form),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          this.error = data.detail || 'Errore nella creazione del cliente.';
+        } else {
+          this.success = true;
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      } catch (e) {
+        this.error = 'Errore di rete: ' + e.message;
+      } finally {
+        this.submitLoading = false;
+      }
+    },
+  };
+}
+</script>
+</body>
+</html>
