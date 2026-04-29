@@ -50,3 +50,9 @@ ALERT_CHAT_ID: int | None = (
 WEBHOOK_PORT: int = int(os.getenv("PORT", os.getenv("WEBHOOK_PORT", "8080")))
 # Secret opzionale per validare le richieste Calendly (Calendly-Webhook-Signature header)
 CALENDLY_WEBHOOK_SECRET: str = os.getenv("CALENDLY_WEBHOOK_SECRET", "")
+
+# Multi-client config
+DEFAULT_CLIENT_ID: str = os.getenv(
+    "DEFAULT_CLIENT_ID", "00000000-0000-0000-0000-000000000001"
+)
+CLIENT_CONFIG_CACHE_TTL: int = int(os.getenv("CLIENT_CONFIG_CACHE_TTL", "3600"))

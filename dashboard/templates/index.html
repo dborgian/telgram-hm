@@ -65,9 +65,9 @@
       <div class="p-6 space-y-6">
         <h1 class="text-xl font-semibold text-white">Dashboard</h1>
         <!-- KPI Cards -->
-        <div class="grid grid-cols-5 gap-4">
+        <div class="grid grid-cols-6 gap-4">
           <template x-for="kpi in kpiCards" :key="kpi.label">
-            <div class="rounded-xl p-4 space-y-2" style="background:#1a1d27;border:1px solid #2d3248;">
+            <div class="rounded-xl p-4 space-y-2" style="background:#1a1d27;border:1px solid #2d3248;" :title="kpi.tooltip||''">
               <div class="text-xs font-medium uppercase tracking-wider" style="color:#6b7280;" x-text="kpi.label"></div>
               <div class="text-3xl font-bold" :style="`color:${kpi.color}`" x-text="kpi.value"></div>
               <div class="text-xs" style="color:#6b7280;" x-text="kpi.sub"></div>
@@ -168,7 +168,6 @@
                   <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Nome</th>
                   <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Username</th>
                   <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Stage</th>
-                  <th class="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Call</th>
                   <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Status</th>
                   <th class="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Turni</th>
                   <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider" style="color:#6b7280;">Visto</th>
@@ -191,12 +190,6 @@
                         :style="`background:${stageHexColor(c.stage)}22;color:${stageHexColor(c.stage)};`"
                         x-text="stageLabel(c.stage)"></span>
                     </td>
-                    <td class="px-4 py-3 text-center" @click.stop>
-                      <template x-if="c.call_booked">
-                        <svg class="w-4 h-4 inline" style="color:#4ade80;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-                      </template>
-                      <template x-if="!c.call_booked"><span style="color:#4b5563;">—</span></template>
-                    </td>
                     <td class="px-4 py-3" @click.stop>
                       <span x-show="c.status==='LL'" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style="background:rgba(239,68,68,0.15);color:#f87171;">LL</span>
                       <span x-show="c.status==='active'" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style="background:rgba(74,222,128,0.15);color:#4ade80;">Attivo</span>
@@ -216,7 +209,7 @@
                         @keydown.enter.prevent="saveNote(c.user_id,$event.target.value);c.notes=$event.target.value;$event.target.blur()" />
                     </td>
                     <td class="px-4 py-3 max-w-[180px]" @click.stop>
-                      <span class="text-xs truncate block" style="color:#9ca3af;" x-text="c.user_summary||'—'"></span>
+                      <span class="text-xs truncate block" style="color:#9ca3af;" x-text="truncate(c.user_summary, 100)"></span>
                     </td>
                     <td class="px-4 py-3 text-center" @click.stop>
                       <template x-if="c.call_booked">
@@ -241,7 +234,7 @@
                   </tr>
                 </template>
                 <tr x-show="filteredCustomers.length===0">
-                  <td colspan="12" class="px-4 py-10 text-center text-sm" style="color:#4b5563;">Nessun cliente trovato</td>
+                  <td colspan="11" class="px-4 py-10 text-center text-sm" style="color:#4b5563;">Nessun cliente trovato</td>
                 </tr>
               </tbody>
             </table>
@@ -631,14 +624,19 @@ function dashboard() {
     get kpiCards() {
       const cs = this.customers;
       const active = cs.filter(c => c.stage && c.stage !== 'stage_9_uninterested' && c.status !== 'LL').length;
-      const qualified = cs.filter(c => c.call_booked || ['stage_5_booking','stage_6_verifying','stage_7_rescheduling','stage_8_postbooking'].includes(c.stage)).length;
-      const pct = active > 0 ? ((qualified / active) * 100).toFixed(1) : '0.0';
+      const qualifiedStage = cs.filter(c => c.call_booked || ['stage_5_booking','stage_6_verifying','stage_7_rescheduling','stage_8_postbooking'].includes(c.stage)).length;
+      const qualifiedSummary = cs.filter(c => c.user_summary && c.user_summary.length > 0).length;
+      const pct = active > 0 ? ((qualifiedStage / active) * 100).toFixed(1) : '0.0';
+      const callBooked = cs.filter(c=>c.call_booked).length;
+      const hotLeads = cs.filter(c=>c.hot_lead).length;
+      const pipeline = hotLeads * 2000;
       return [
-        {label:'Conversazioni Attive',      value: active,                           color:'#4ade80', sub:'inizializzate'},
-        {label:'Conversazioni Qualificate', value: qualified,                        color:'#818cf8', sub:'intent confermato'},
-        {label:'% Qualifica',               value: pct + '%',                        color:'#60a5fa', sub:'qualificate / attive'},
-        {label:'Call Prenotate',            value: cs.filter(c=>c.call_booked).length, color:'#f59e0b', sub:'call_booked = true'},
-        {label:'Totale Clienti',            value: cs.length,                        color:'#f9fafb', sub:'nel database'},
+        {label:'Conversazioni Attive',      value: active,                color:'#4ade80', sub:'inizializzate', tooltip:'Lead attive (escluse stage_9 e LL)'},
+        {label:'Qualificate',               value: qualifiedSummary,      color:'#818cf8', sub:'con user_summary', tooltip:'Clienti con profilo qualificato (user_summary compilato)'},
+        {label:'% Qualifica',               value: pct + '%',             color:'#60a5fa', sub:'qualificate / attive', tooltip:'Percentuale lead in stage >= 5 o call_booked su attive'},
+        {label:'Call Prenotate',            value: callBooked,            color:'#f59e0b', sub:'call_booked = true', tooltip:'Prenotazioni confermate via Calendly'},
+        {label:'Totale Clienti',            value: cs.length,             color:'#f9fafb', sub:'nel database', tooltip:'Tutti i clienti registrati'},
+        {label:'Valore Pipeline',           value: '\u20AC' + pipeline.toLocaleString('it-IT'), color:'#a78bfa', sub: hotLeads + ' hot leads \u00D7 \u20AC2.000', tooltip:'Stima valore pipeline: hot leads × €2.000 valore medio'},
       ];
     },
 
@@ -702,6 +700,7 @@ function dashboard() {
       } catch { return String(iso); }
     },
 
+    truncate(str, len) { if (!str) return '—'; return str.length > len ? str.slice(0, len) + '…' : str; },
     stageLabel(key) { return STAGE_LABELS[key]||key||'—'; },
     stageHexColor(key) { return STAGE_HEX[key]||'#6b7280'; },
 
@@ -752,7 +751,7 @@ function dashboard() {
         data: {
           labels: this.convData.map(d => d.date.slice(5)),
           datasets: [{
-            label: 'Conversazioni',
+            label: 'Totali',
             data: this.convData.map(d => d.count),
             borderColor: '#818cf8',
             backgroundColor: 'rgba(129,140,248,0.08)',
@@ -760,13 +759,22 @@ function dashboard() {
             pointRadius: 3,
             pointBackgroundColor: '#818cf8',
             fill: true,
+          },{
+            label: 'Qualificati',
+            data: this.convData.map(d => d.qualified_count||0),
+            borderColor: '#4ade80',
+            backgroundColor: 'rgba(74,222,128,0.08)',
+            tension: 0.4,
+            pointRadius: 3,
+            pointBackgroundColor: '#4ade80',
+            fill: true,
           }]
         },
         options: {
           animation: { duration: 0 },
           responsive: true,
           maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
+          plugins: { legend: { display: true, labels: { color: '#9ca3af', font: { size: 11 }, usePointStyle: true, pointStyle: 'circle' } } },
           scales: {
             x: { ticks: { color: '#6b7280', font: { size: 10 } }, grid: { color: '#22263a' } },
             y: { ticks: { color: '#6b7280', font: { size: 10 }, stepSize: 1 }, grid: { color: '#22263a' }, beginAtZero: true, min: 0, suggestedMax: 1 }

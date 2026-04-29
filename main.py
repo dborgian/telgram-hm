@@ -131,7 +131,12 @@ async def _user_worker(
                 combined = "\n".join(buffer)
                 buffer.clear()
                 await process_conversation(
-                    client, user_id, first_name, username, combined
+                    client,
+                    user_id,
+                    first_name,
+                    username,
+                    combined,
+                    client_id=config.DEFAULT_CLIENT_ID,
                 )
         except asyncio.TimeoutError:
             if buffer:
@@ -141,7 +146,12 @@ async def _user_worker(
                 combined = "\n".join(buffer)
                 buffer.clear()
                 await process_conversation(
-                    client, user_id, first_name, username, combined
+                    client,
+                    user_id,
+                    first_name,
+                    username,
+                    combined,
+                    client_id=config.DEFAULT_CLIENT_ID,
                 )
         except FloodWaitError as e:
             logger.warning(

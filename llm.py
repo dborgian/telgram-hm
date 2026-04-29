@@ -1,4 +1,10 @@
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from models import ClientConfig
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from openai import AsyncOpenAI, RateLimitError, APIError
@@ -189,6 +195,7 @@ async def classify_stage(
     customer: CustomerProfile | None,
     history: list[HistoryTurn],
     new_message: str,
+    cfg: ClientConfig | None = None,
 ) -> tuple[str, bool]:
     """Classifica lo stage e rileva se serve assistenza umana.
     Restituisce (stage, assistance_needed).
@@ -237,7 +244,7 @@ async def classify_stage(
     )
 
     response = await _client.chat.completions.create(
-        model=_MODEL,
+        model=cfg.llm_model if cfg else _MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.0,
         max_tokens=50,
@@ -305,6 +312,7 @@ async def generate_reply(
     new_message: str,
     stage: str = _DEFAULT_STAGE,
     user_id: int = 0,
+    cfg: ClientConfig | None = None,
 ) -> str:
     """Genera la risposta per lo stage dato. Temperature=0.8 per naturalezza."""
     call_booked = bool((customer or {}).get("call_booked", False))
@@ -319,7 +327,9 @@ async def generate_reply(
     # Contesto VSL/Calendly (replica vsllinksent1/vsllinksent2 di n8n)
     vsllinksent1, vsllinksent2 = _build_vsl_context(history, call_booked)
 
-    stage_instr = STAGE_INSTRUCTIONS.get(stage, STAGE_INSTRUCTIONS[_DEFAULT_STAGE])
+    stage_instr = (cfg.stage_instructions if cfg else STAGE_INSTRUCTIONS).get(
+        stage, STAGE_INSTRUCTIONS[_DEFAULT_STAGE]
+    )
     stage_instr = stage_instr.format(
         vsl_link=vsl_link,
         calendly_link=calendly_link,
@@ -328,7 +338,7 @@ async def generate_reply(
         vsllinksent2=vsllinksent2,
     )
 
-    system_content = SYSTEM_PROMPT_BASE
+    system_content = cfg.system_prompt_base if cfg else SYSTEM_PROMPT_BASE
     if vsllinksent1:
         system_content += f"\n\n{vsllinksent1}"
     system_content += f"\n\n# STAGE ATTUALE: {stage}\n{stage_instr}"
@@ -363,7 +373,7 @@ async def generate_reply(
     messages.append({"role": "user", "content": _sanitize_user_input(new_message)})
 
     response = await _client.chat.completions.create(
-        model=_MODEL,
+        model=cfg.llm_model if cfg else _MODEL,
         messages=messages,
         temperature=0.8,
         max_tokens=500,

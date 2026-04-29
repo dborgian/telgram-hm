@@ -135,6 +135,7 @@ async def list_customers(_: str = Depends(require_auth)):
                 or bool(r.get("call_booked"))
                 or (r.get("conversation_stage") in HOT_STAGES)
             )
+            r["user_summary"] = r.get("user_summary") or ""
             out.append(r)
         return out
     except HTTPException:
@@ -221,21 +222,33 @@ async def analytics_conversations(_: str = Depends(require_auth)):
         sb = await get_client()
         cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
         res = await (
-            sb.table("customers").select("last_seen").gte("last_seen", cutoff).execute()
+            sb.table("customers")
+            .select("last_seen, user_summary")
+            .gte("last_seen", cutoff)
+            .execute()
         )
         counts: dict[str, int] = {}
+        qualified_counts: dict[str, int] = {}
         for row in res.data:
             fs = row.get("last_seen")
             if not fs:
                 continue
             day = fs[:10]  # "YYYY-MM-DD"
             counts[day] = counts.get(day, 0) + 1
+            if row.get("user_summary"):
+                qualified_counts[day] = qualified_counts.get(day, 0) + 1
         # Fill missing days with 0 for last 30 days
         today = date.today()
         result = []
         for i in range(30, -1, -1):
             d = (today - timedelta(days=i)).isoformat()
-            result.append({"date": d, "count": counts.get(d, 0)})
+            result.append(
+                {
+                    "date": d,
+                    "count": counts.get(d, 0),
+                    "qualified_count": qualified_counts.get(d, 0),
+                }
+            )
         return result
     except HTTPException:
         raise

@@ -3,6 +3,7 @@ import logging
 import random
 import re as _re
 from telethon.errors import FloodWaitError
+import config
 import db
 import llm
 import notifier
@@ -71,9 +72,12 @@ async def process_conversation(
     first_name: str | None,
     username: str | None,
     combined_text: str,
+    client_id: str = "",
 ) -> None:
     reply: str | None = None
     try:
+        effective_client_id = client_id or config.DEFAULT_CLIENT_ID
+        cfg = await db.get_client_config(effective_client_id)
         await db.upsert_customer(user_id, first_name, username)
         # Reset awaiting_reply: l'utente ha risposto
         _f = asyncio.ensure_future(db.set_awaiting_reply(user_id, False))
@@ -89,7 +93,7 @@ async def process_conversation(
         ctx_history = history[-_HISTORY_CONTEXT:]
         # Step 1: classifica stage (temp=0.0, veloce)
         stage, assistance_needed = await llm.classify_stage(
-            customer, ctx_history, combined_text
+            customer, ctx_history, combined_text, cfg=cfg
         )
 
         # Anti-regression guard: Supabase è source of truth per lo stage.
@@ -148,7 +152,7 @@ async def process_conversation(
 
         # Step 2: genera risposta (temp=0.8, qualità)
         reply = await llm.generate_reply(
-            ctx_history, customer, combined_text, stage, user_id
+            ctx_history, customer, combined_text, stage, user_id, cfg=cfg
         )
 
         # DISENGAGE: il modello segnala di chiudere la conversazione — non inviare nulla
