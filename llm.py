@@ -85,9 +85,9 @@ STAGE_INSTRUCTIONS: dict[str, str] = {
     "stage_7_rescheduling": """HANDLING RESCHEDULING
 - **Obiettivo:** Assistere un prospect che ha già prenotato ma vuole spostare l'appuntamento.
 - **Data odierna:** {today}. Il lead NON può prenotare per lo stesso giorno.
-- **Azione:** Non usare il link di prenotazione. Chiedi data e orario desiderati. Spostiamo noi la chiamata manualmente. Le prenotazioni si fanno solo a ore intere (16:00, 17:00 — NON 16:30).
-- **Script:** "Se per te fa comodo puoi dirmi una data e orario che va bene per te."
-- **Esempio:** "Fammi sapere per quale data e ora vorresti e ti sposto la chiamata." """,
+- **Azione:** NON inviare il link Calendly. NON dire all'utente che non esiste un link o che non lo utilizziamo — questa è solo una procedura interna. Chiedi semplicemente data e orario desiderati e provvederemo a spostare la chiamata manualmente. Le prenotazioni si fanno solo a ore intere (16:00, 17:00 — NON 16:30).
+- **Script:** "Se per te fa comodo puoi dirmi una data e un orario che va bene per te e provvedo a spostare la chiamata!"
+- **Esempio:** "Fammi sapere per quale data e ora vorresti e sistemo io." """,
     "stage_8_postbooking": """Q&A POST-PRENOTAZIONE
 - **Obiettivo:** Rispondere a domande di chi ha già prenotato.
 - **Azione:** Se ringrazia, di' prego e che può chiedere in qualsiasi momento. Rispondi alle domande. Le chiamate sono Google Meet e durano circa un'ora. Riceverà conferma via email e via WhatsApp da un coach. Se non hai info sufficienti, di' che ne parleranno in chiamata. Se il budget è < 150€, di' che la chiamata è solo per chi può investire almeno 150€ e può ricontattarci in futuro.
@@ -258,10 +258,22 @@ async def classify_stage(
         stage = _DEFAULT_STAGE
 
     # Gate programmatico call_booked — replica logica n8n Code node
-    # stage_7_rescheduling è valido con call_booked=False (l'utente ha cancellato e sta riprenotando)
     if not call_booked and stage == "stage_8_postbooking":
         stage = "stage_7_rescheduling"
         logger.warning("Gate call_booked=False: stage_8 forzato a stage_7_rescheduling")
+
+    # stage_7 con call_booked=False è valido SOLO se il lead aveva già prenotato
+    # (stage corrente era 7 o 8 — vera cancellazione). Se il lead non ha mai prenotato
+    # e il classificatore assegna stage_7 per errore, forzare stage_5_booking.
+    if not call_booked and stage == "stage_7_rescheduling":
+        current_cs = (customer or {}).get("conversation_stage", "stage_1_greet")
+        if current_cs not in {"stage_7_rescheduling", "stage_8_postbooking"}:
+            stage = "stage_5_booking"
+            logger.warning(
+                "Gate: stage_7 con call_booked=False e stage_corrente=%s → forzato stage_5_booking",
+                current_cs,
+            )
+
     if call_booked and stage not in {"stage_7_rescheduling", "stage_8_postbooking"}:
         stage = "stage_8_postbooking"
         logger.warning("Gate call_booked=True: stage forzato a stage_8_postbooking")
@@ -376,6 +388,22 @@ async def generate_reply(
         if calendly_link not in reply:
             reply = reply.rstrip() + f"\n{calendly_link}"
         logger.warning("LLM ha omesso calendly_link — iniettato manualmente in stage_5")
+
+    # stage_7 guard: il bot NON deve dire all'utente che non esiste un link di prenotazione
+    if stage == "stage_7_rescheduling":
+        _bad_phrases_s7 = (
+            "non utilizziamo un link",
+            "non abbiamo un link",
+            "non esiste un link",
+            "senza link di prenotazione",
+            "non uso il link",
+        )
+        if any(p in reply.lower() for p in _bad_phrases_s7):
+            reply = "Se per te fa comodo puoi dirmi una data e un orario che va bene per te e provvedo a spostare la chiamata! 😊"
+            logger.warning(
+                "stage_7 guard: bot ha dichiarato assenza link — override con script corretto (user %d)",
+                user_id,
+            )
 
     # Hard gate stage_6 + call_booked=False: override se il modello ha confermato la prenotazione
     if stage == "stage_6_verifying" and not call_booked:
