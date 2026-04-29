@@ -100,11 +100,11 @@
               <template x-for="(a,i) in allAlerts" :key="i">
                 <div class="rounded-lg p-3 space-y-1" style="background:#22263a;">
                   <div class="flex items-start justify-between gap-2">
-                    <div class="text-sm font-medium" style="color:#e5e7eb;" x-text="a.name||a.username||a.user_id||'?'"></div>
+                    <div class="text-sm font-medium" style="color:#e5e7eb;" x-text="customers.find(c=>c.user_id==a.user_id)?.first_name || ('#'+a.user_id) || '?'"></div>
                     <span class="flex-shrink-0 text-xs px-2 py-0.5 rounded-full font-semibold" style="background:rgba(249,115,22,0.15);color:#fb923c;">ASSISTENZA</span>
                   </div>
-                  <div class="text-xs" style="color:#6b7280;" x-text="stageLabel(a.stage)"></div>
-                  <div class="text-xs" style="color:#4b5563;" x-text="formatDate(a.timestamp||a.last_seen)"></div>
+                  <div class="text-xs" style="color:#6b7280;" x-text="stageLabel(a.to_stage||a.from_stage)"></div>
+                  <div class="text-xs" style="color:#4b5563;" x-text="formatDate(a.created_at)"></div>
                 </div>
               </template>
               <div x-show="allAlerts.length===0" class="text-sm py-4 text-center" style="color:#6b7280;">Nessun avviso</div>
@@ -142,6 +142,8 @@
           <select x-model="filterStatus" class="rounded-lg px-3 py-2 text-sm focus:outline-none" style="background:#22263a;border:1px solid #3d4260;color:#d1d5db;">
             <option value="">Tutti gli status</option>
             <option value="LL">LL (Lead Perso)</option>
+            <option value="active">Attivo</option>
+            <option value="paused">In pausa</option>
           </select>
           <label class="flex items-center gap-2 cursor-pointer text-sm" style="color:#9ca3af;">
             <input type="checkbox" x-model="filterCallBooked" class="rounded" />
@@ -259,12 +261,12 @@
                 </tr>
               </thead>
               <tbody>
-                <template x-for="m in metrics" :key="m.stage">
+                <template x-for="m in metrics" :key="m.stage_key||m.stage">
                   <tr style="border-bottom:1px solid #1a1d27;" @mouseover="$el.style.background='#22263a'" @mouseleave="$el.style.background=''">
                     <td class="px-4 py-3">
                       <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
-                        :style="`background:${stageHexColor(m.stage)}22;color:${stageHexColor(m.stage)};`"
-                        x-text="stageLabel(m.stage)"></span>
+                        :style="`background:${stageHexColor(m.stage_key||m.stage)}22;color:${stageHexColor(m.stage_key||m.stage)};`"
+                        x-text="stageLabel(m.stage_key||m.stage)"></span>
                     </td>
                     <td class="px-4 py-3 text-right" style="color:#d1d5db;" x-text="m.impressions??m.total_entries??'—'"></td>
                     <td class="px-4 py-3 text-right" style="color:#d1d5db;" x-text="m.advances??m.exits??'—'"></td>
@@ -503,7 +505,7 @@ function dashboard() {
     view: 'dashboard',
     customers: [],
     funnel: {},
-    alerts: { assistance: [], lost_leads: [] },
+    alerts: { assistance_needed: [], lost_leads: [] },
     metrics: [],
     suggestions: [],
     selectedCustomer: null,
@@ -558,7 +560,15 @@ function dashboard() {
       return v != null ? String(v) : '<span style="color:#4b5563">—</span>';
     },
 
-    async init() { await this.loadAll(); },
+    async init() {
+      await this.loadAll();
+      // Re-render chart whenever user returns to dashboard view
+      this.$watch('view', val => {
+        if (val === 'dashboard' && this.convData.length) {
+          this.$nextTick(() => this.renderChart());
+        }
+      });
+    },
 
     async loadAll() {
       this.loading = true;
@@ -566,13 +576,13 @@ function dashboard() {
         const [r0,r1,r2,r3,r4] = await Promise.allSettled([
           fetch('/api/customers').then(r=>r.ok?r.json():[]),
           fetch('/api/funnel').then(r=>r.ok?r.json():{}),
-          fetch('/api/alerts').then(r=>r.ok?r.json():{assistance:[],lost_leads:[]}),
+          fetch('/api/alerts').then(r=>r.ok?r.json():{assistance_needed:[],lost_leads:[]}),
           fetch('/api/metrics').then(r=>r.ok?r.json():[]),
           fetch('/api/stage-suggestions').then(r=>r.ok?r.json():[]),
         ]);
         this.customers   = r0.status==='fulfilled' ? (r0.value ?? []) : [];
         this.funnel      = r1.status==='fulfilled' ? (r1.value ?? {}) : {};
-        this.alerts      = r2.status==='fulfilled' ? (r2.value ?? {assistance:[],lost_leads:[]}) : {assistance:[],lost_leads:[]};
+        this.alerts      = r2.status==='fulfilled' ? (r2.value ?? {assistance_needed:[],lost_leads:[]}) : {assistance_needed:[],lost_leads:[]};
         this.metrics     = r3.status==='fulfilled' ? (Array.isArray(r3.value)?r3.value:[]) : [];
         this.suggestions = r4.status==='fulfilled' ? (Array.isArray(r4.value)?r4.value:[]) : [];
         this.lastRefresh = new Date().toISOString();
@@ -629,8 +639,8 @@ function dashboard() {
     get funnelMaxCount() { return Math.max(...this.funnelRows.map(r=>r.count),1); },
 
     get allAlerts() {
-      return (this.alerts.assistance||[]).map(x=>({...x,type:'assistance_needed'}))
-        .sort((a,b)=>new Date(b.timestamp||b.last_seen||0)-new Date(a.timestamp||a.last_seen||0));
+      return (this.alerts.assistance_needed||[]).map(x=>({...x,type:'assistance_needed'}))
+        .sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
     },
 
     async openCustomer(userId) {
@@ -641,8 +651,10 @@ function dashboard() {
           fetch(`/api/customers/${userId}`).then(r=>r.ok?r.json():null),
           fetch(`/api/customers/${userId}/messages`).then(r=>r.ok?r.json():[]),
         ]);
-        this.selectedCustomer = rCustomer.status==='fulfilled' && rCustomer.value
-          ? rCustomer.value
+        // API returns {customer: {...}, transitions: [...]} — flatten it
+        const raw = rCustomer.status==='fulfilled' && rCustomer.value ? rCustomer.value : null;
+        this.selectedCustomer = raw
+          ? {...(raw.customer ?? raw), transitions: raw.transitions ?? []}
           : (this.customers.find(c=>c.user_id==userId)||null);
         this.selectedMessages = rMessages.status==='fulfilled' ? (rMessages.value||[]) : [];
       } catch {
