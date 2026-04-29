@@ -193,3 +193,33 @@ async def save_message(user_id: int, role: str, content: str) -> None:
         .execute()
     )
     logger.debug("saved message role=%s for user %d", role, user_id)
+
+
+async def set_awaiting_reply(user_id: int, value: bool) -> None:
+    """Traccia se il bot sta aspettando una risposta dall'utente.
+
+    Migration richiesta (una tantum su Supabase):
+        ALTER TABLE customers ADD COLUMN IF NOT EXISTS awaiting_reply BOOLEAN DEFAULT FALSE;
+    """
+    await _with_supabase_retry(
+        lambda sb: sb.table("customers")
+        .update({"awaiting_reply": value})
+        .eq("user_id", user_id)
+        .execute()
+    )
+    logger.debug("awaiting_reply=%s per user %d", value, user_id)
+
+
+async def set_hot_lead(user_id: int) -> None:
+    """Marca il lead come hot nel DB (segnale di close rilevato).
+
+    Migration richiesta (una tantum su Supabase):
+        ALTER TABLE customers ADD COLUMN IF NOT EXISTS hot_lead BOOLEAN DEFAULT FALSE;
+    """
+    await _with_supabase_retry(
+        lambda sb: sb.table("customers")
+        .update({"hot_lead": True})
+        .eq("user_id", user_id)
+        .execute()
+    )
+    logger.info("hot_lead=True impostato per user %d", user_id)

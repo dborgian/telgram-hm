@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import random
+import re as _re
 from telethon.errors import FloodWaitError
 import db
 import llm
@@ -11,6 +12,14 @@ logger = logging.getLogger(__name__)
 # Number of history turns passed to both classify_stage and generate_reply.
 # Keeps context symmetric and bounded.
 _HISTORY_CONTEXT = 10
+
+# Pattern per rilevare segnali di close ad alta probabilità (da setter-bot)
+_HOT_SIGNAL_PATTERNS = [
+    r"(lascio|smetto|stanca|lasciare|smettere).*(lavoro|azienda|posto)",
+    r"(già pagat[oa]|già investit[oa]|corso.*(non ha funzionat|inutile))",
+    r"(rateizzare|pagare a rate|piano di pagamento|rate mensil)",
+    r"(non vedo l'ora|pront[ao] subito|voglio iniziare subito|iniziare quanto prima)",
+]
 
 # Ordered stage progression — used for anti-regression guard.
 # Supabase conversation_stage is the single source of truth; the LLM
@@ -66,6 +75,15 @@ async def process_conversation(
     reply: str | None = None
     try:
         await db.upsert_customer(user_id, first_name, username)
+        # Reset awaiting_reply: l'utente ha risposto
+        _f = asyncio.ensure_future(db.set_awaiting_reply(user_id, False))
+        _f.add_done_callback(
+            lambda f: (
+                logger.warning("set_awaiting_reply(False) error: %s", f.exception())
+                if f.exception()
+                else None
+            )
+        )
         history = await db.get_history(user_id)
         customer = await db.get_customer(user_id)
         ctx_history = history[-_HISTORY_CONTEXT:]
@@ -94,6 +112,21 @@ async def process_conversation(
                 stage = current_stage
 
         await db.update_stage(user_id, stage)
+
+        # Hot signal detection: rileva segnali di close ad alta probabilità
+        if not assistance_needed and any(
+            _re.search(p, combined_text, _re.IGNORECASE) for p in _HOT_SIGNAL_PATTERNS
+        ):
+            await db.set_hot_lead(user_id)
+            await notifier.notify_alert(
+                client,
+                user_id,
+                first_name,
+                username,
+                reason="🔥 HOT LEAD — segnale di close rilevato",
+                stage=stage,
+                extra=f"Messaggio: {combined_text[:200]}",
+            )
 
         # Se serve assistenza umana: logga, notifica e non rispondere
         if assistance_needed:
@@ -146,6 +179,15 @@ async def process_conversation(
             async with client.action(user_id, "typing"):
                 await asyncio.sleep(delay)
             await client.send_message(user_id, chunk)
+        # Traccia che il bot ha inviato e sta aspettando risposta
+        _g = asyncio.ensure_future(db.set_awaiting_reply(user_id, True))
+        _g.add_done_callback(
+            lambda f: (
+                logger.warning("set_awaiting_reply(True) error: %s", f.exception())
+                if f.exception()
+                else None
+            )
+        )
 
     except FloodWaitError as e:
         logger.warning(

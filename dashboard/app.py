@@ -130,8 +130,10 @@ async def list_customers(_: str = Depends(require_auth)):
             r["conversation_stage"] = cs.get("conversation_stage")
             r["turn_count"] = cs.get("turn_count", 0)
             r["last_reply_at"] = cs.get("last_reply_at")
-            r["hot_lead"] = bool(r.get("call_booked")) or (
-                r.get("conversation_stage") in HOT_STAGES
+            r["hot_lead"] = (
+                bool(r.get("hot_lead"))
+                or bool(r.get("call_booked"))
+                or (r.get("conversation_stage") in HOT_STAGES)
             )
             out.append(r)
         return out
@@ -161,8 +163,10 @@ async def get_customer(user_id: int, _: str = Depends(require_auth)):
         customer["conversation_stage"] = cs.get("conversation_stage")
         customer["turn_count"] = cs.get("turn_count", 0)
         customer["last_reply_at"] = cs.get("last_reply_at")
-        customer["hot_lead"] = bool(customer.get("call_booked")) or (
-            customer.get("conversation_stage") in HOT_STAGES
+        customer["hot_lead"] = (
+            bool(customer.get("hot_lead"))
+            or bool(customer.get("call_booked"))
+            or (customer.get("conversation_stage") in HOT_STAGES)
         )
 
         transitions = await (

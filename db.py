@@ -111,3 +111,15 @@ async def set_call_booked(user_id: int, booked: bool = True) -> None:
 async def set_lead_status(user_id: int, status: str) -> None:
     """Aggiorna lo status del lead su Supabase (es. 'LL' = Lost Lead)."""
     await store.set_lead_status(user_id, status)
+
+
+async def set_awaiting_reply(user_id: int, value: bool) -> None:
+    """Aggiorna awaiting_reply su Supabase e invalida cache Redis."""
+    await store.set_awaiting_reply(user_id, value)
+    await cache.invalidate_profile(user_id)
+
+
+async def set_hot_lead(user_id: int) -> None:
+    """Marca il lead come hot su Supabase e invalida cache Redis."""
+    await store.set_hot_lead(user_id)
+    await cache.invalidate_profile(user_id)

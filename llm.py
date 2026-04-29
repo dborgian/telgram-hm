@@ -45,6 +45,7 @@ Il tuo obiettivo #1 è **qualificare emotivamente** i prospect per vedere se son
      - Fase VSL: "Non ci vuole troppo, solo 10 minuti. Capirai subito se l'opportunità fa per te"
      - Fase booking: "Possiamo solo prendere altre 4-5 donne prima che l'opportunità non ci sia più. Ti consiglio di prenotare ci vuole pochissimo"
 - **Principio base:** Evita troppi dettagli. Crea fiducia e curiosità per portarla alla chiamata. Non sembrare scripted.
+- **Durata chiamata:** La consulenza gratuita dura circa 30 minuti (NON 10 minuti — i 10 minuti riguardano solo il video VSL).
 - **CONFERMATO:** Se il lead dice "Confermato" (o varianti come "conferma/confermo") dopo che hai inviato il video, significa che ha prenotato con successo. Confermale la prenotazione e di' che riceverà un messaggio WhatsApp da un coach."""
 
 # Ogni stage riceve {vsl_link}, {calendly_link}, {today}, {tomorrow}, {vsllinksent2}
@@ -69,7 +70,10 @@ STAGE_INSTRUCTIONS: dict[str, str] = {
 - **Obiezione prezzo:** "Per quanto riguarda i prezzi posso dirti che noi non abbiamo pacchetti preconfezionati, poiché sappiamo che ogni persona è diversa, quindi adattiamo il pacchetto e il prezzo sulla base di esigenze e obiettivi specifici e dovremmo conoscerti meglio per poterti dire più precisamente quale sia l'investimento per iniziare con un nostro percorso.\n\nFacciamo la chiamata per dimostrare come lavoriamo e la trasparenza su come facciamo le cose.\nPoi chiaramente sta a te capire se procedere o meno, dopo che ti avremo spiegato il tutto dalla A-Z.\n\nDi certo non pretendiamo che tu prenda una decisione a scatola chiusa, non ci piace lavorare in questo modo e non ci interessa prendere persone così.\nChe ne dici, ti mando il link per prenotarla?✍🏻"
 - **Richiesta prezzo:** "In caso possiamo esserti di aiuto, i percorsi che abbiamo sono personalizzati in base alle esigenze di ogni singola persona, per questo motivo non abbiamo un prezzo fisso. È proprio durante la consulenza gratuita che le mie coach ti illustreranno tutto nel dettaglio e creeranno un piano su misura per te, anche a livello economico. Ti andrebbe di fissarla? È senza impegno. 💕"
 - **Pivot generale:** "Il modo migliore per capire tutto è parlarne con un coach: ti va di prenotare una chiamata? 📞"
-- **Budget:** Se il lead menziona problemi economici, dopo la risposta normale chiedi il budget. Budget >= 150€: può prenotare e lavorare su un piano rateale con il coach. Budget < 150€: NON proporre la chiamata — di' che i programmi richiedono un investimento maggiore e può ricontattarci in futuro. """,
+- **Budget (generico/incerto):** Se il lead menziona problemi economici, NON arrenderti subito. Prima fai una domanda diretta: "Capisco, ma dimmi: quanto hai da parte in questo momento? Anche una cifra piccola può bastare per iniziare 💕". Se la risposta è >= 150€: proponi il piano rateale in chiamata. Se la risposta è < 150€ o davvero 0: di' che i programmi richiedono un investimento maggiore e può ricontattarci in futuro quando si sente pronta.
+- **Push urgenza con budget basso (150-300€):** "Il programma è personalizzato sulla tua situazione — molte delle nostre ragazze hanno iniziato con molto meno di quanto pensassero. Vale davvero la pena sentire cosa possiamo fare per te. Ti faccio prenotare la chiamata? ✍🏻"
+- **Budget dichiarato >= 150€:** Puoi prenotare e si discute il piano rateale con il coach in chiamata.
+- **Budget dichiarato < 150€ o 0€:** Di' gentilmente che i programmi richiedono un investimento maggiore e può ricontattarci quando si sente pronta.""",
     "stage_5_booking": """BOOKING THE CALL
 - **Obiettivo:** Inviare il link di prenotazione a un prospect qualificato e interessato.
 - **Azione:** Invia il link Calendly e chiedi conferma dopo la prenotazione. Se non trova orari, deve prenotare uno slot qualsiasi e poi lo spostiamo noi. Se non è convinta, insisti sul fatto che la chiamata è gratuita e senza impegno.
@@ -90,7 +94,7 @@ STAGE_INSTRUCTIONS: dict[str, str] = {
 - **Esempio:** "Fammi sapere per quale data e ora vorresti e sistemo io." """,
     "stage_8_postbooking": """Q&A POST-PRENOTAZIONE
 - **Obiettivo:** Rispondere a domande di chi ha già prenotato.
-- **Azione:** Se ringrazia, di' prego e che può chiedere in qualsiasi momento. Rispondi alle domande. Le chiamate sono Google Meet e durano circa un'ora. Riceverà conferma via email e via WhatsApp da un coach. Se non hai info sufficienti, di' che ne parleranno in chiamata. Se il budget è < 150€, di' che la chiamata è solo per chi può investire almeno 150€ e può ricontattarci in futuro.
+- **Azione:** Se ringrazia, di' prego e che può chiedere in qualsiasi momento. Rispondi alle domande. Le chiamate sono Google Meet e durano circa 30 minuti. Riceverà conferma via email e via WhatsApp da un coach. Se non hai info sufficienti, di' che ne parleranno in chiamata. Se il budget è < 150€, di' che la chiamata è solo per chi può investire almeno 150€ e può ricontattarci in futuro.
 - **Nomi coach (per verificare se un messaggio ricevuto è legittimo):**
   Matteo F. — 353 454 5015
   Giulia — 351 549 9183
@@ -435,14 +439,49 @@ async def generate_reply(
 
 
 async def transcribe_audio(file_bytes: bytes) -> str:
-    """Stub: trascrizione audio non disponibile senza OpenAI."""
-    logger.warning("transcribe_audio chiamato ma OpenAI non è configurato")
-    return "[messaggio vocale — trascrizione non disponibile]"
+    """Trascrive un file audio (ogg/mp3/wav) usando Whisper-1."""
+    import io
+
+    try:
+        response = await _client.audio.transcriptions.create(
+            model="whisper-1",
+            file=("audio.ogg", io.BytesIO(file_bytes), "audio/ogg"),
+        )
+        return response.text
+    except Exception as exc:
+        logger.error("transcribe_audio fallito: %s", exc)
+        return "[messaggio vocale — trascrizione non disponibile]"
 
 
 async def describe_image(file_bytes: bytes, caption: str = "") -> str:
-    """Stub: descrizione immagine non disponibile senza OpenAI."""
-    logger.warning("describe_image chiamato ma OpenAI non è configurato")
-    if caption:
-        return f"[immagine con didascalia: {caption}]"
-    return "[immagine ricevuta — descrizione non disponibile]"
+    """Descrive un'immagine usando GPT-4o-mini vision."""
+    import base64
+
+    try:
+        b64 = base64.b64encode(file_bytes).decode()
+        response = await _client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                        },
+                        {
+                            "type": "text",
+                            "text": caption
+                            or "Descrivi brevemente l'immagine in italiano, in una frase.",
+                        },
+                    ],
+                }
+            ],
+            max_tokens=200,
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as exc:
+        logger.error("describe_image fallito: %s", exc)
+        if caption:
+            return f"[immagine con didascalia: {caption}]"
+        return "[immagine ricevuta — descrizione non disponibile]"
