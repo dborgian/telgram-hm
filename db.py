@@ -46,9 +46,16 @@ async def get_history(user_id: int) -> list[dict]:
 
 
 async def save_turn(user_id: int, user_msg: str, assistant_msg: str) -> None:
-    """Salva il turno su Redis (history) e incrementa contatore su Supabase."""
+    """Salva il turno su Redis (history), incrementa contatore e persiste su Supabase."""
+    import asyncio
+
     await cache.save_turn(user_id, user_msg, assistant_msg)
-    await store.increment_turn_count(user_id)
+    await asyncio.gather(
+        store.increment_turn_count(user_id),
+        store.save_message(user_id, "user", user_msg),
+        store.save_message(user_id, "assistant", assistant_msg),
+        return_exceptions=True,  # messages table potrebbe non esistere ancora
+    )
 
 
 async def upsert_customer(

@@ -363,8 +363,24 @@
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
+    <!-- Tabs -->
+    <div class="flex-shrink-0 px-6" style="border-bottom:1px solid #2d3248;">
+      <div class="flex gap-1 -mb-px">
+        <button @click="modalTab='profile'" class="px-4 py-3 text-xs font-medium transition-colors"
+          :style="modalTab==='profile' ? 'color:#818cf8;border-bottom:2px solid #818cf8;' : 'color:#6b7280;border-bottom:2px solid transparent;'">
+          Profilo &amp; Storico
+        </button>
+        <button @click="modalTab='chat'" class="px-4 py-3 text-xs font-medium transition-colors flex items-center gap-1.5"
+          :style="modalTab==='chat' ? 'color:#818cf8;border-bottom:2px solid #818cf8;' : 'color:#6b7280;border-bottom:2px solid transparent;'">
+          Conversazione
+          <span x-show="selectedMessages.length>0" class="px-1.5 py-0.5 rounded-full text-xs" style="background:#2d3248;color:#9ca3af;" x-text="selectedMessages.length"></span>
+        </button>
+      </div>
+    </div>
     <!-- Body -->
     <div class="flex-1 overflow-y-auto scrollbar-thin p-6" x-show="selectedCustomer">
+      <!-- TAB: Profilo & Storico -->
+      <div x-show="modalTab==='profile'">
       <div class="grid grid-cols-2 gap-6">
         <!-- Profile -->
         <div class="space-y-4">
@@ -408,6 +424,46 @@
           </div>
         </div>
       </div>
+      </div><!-- end tab profile -->
+
+      <!-- TAB: Conversazione -->
+      <div x-show="modalTab==='chat'" class="space-y-3 py-1">
+        <template x-if="selectedMessages.length===0">
+          <div class="rounded-xl p-10 text-center" style="background:#22263a;">
+            <div class="text-sm" style="color:#4b5563;">Nessuna conversazione registrata.</div>
+            <div class="text-xs mt-1.5" style="color:#374151;">I messaggi vengono salvati dalle prossime conversazioni.</div>
+          </div>
+        </template>
+        <template x-for="(msg, idx) in selectedMessages" :key="msg.id||idx">
+          <div>
+            <!-- System marker ([ASSISTANCE_NEEDED], [DISENGAGE]) -->
+            <template x-if="msg.content.startsWith('[')">
+              <div class="flex justify-center my-2">
+                <span class="text-xs px-3 py-1 rounded-full" style="background:#2d3248;color:#6b7280;" x-text="msg.content"></span>
+              </div>
+            </template>
+            <!-- Messaggio utente (destra) -->
+            <template x-if="!msg.content.startsWith('[') && msg.role==='user'">
+              <div class="flex justify-end">
+                <div class="max-w-[72%] space-y-1">
+                  <div class="rounded-2xl px-4 py-2.5 text-sm leading-relaxed" style="background:rgba(79,70,229,0.25);color:#e0e7ff;border-radius:1rem 1rem 0.25rem 1rem;" x-text="msg.content"></div>
+                  <div class="text-xs text-right pr-1" style="color:#4b5563;" x-text="formatDate(msg.created_at)"></div>
+                </div>
+              </div>
+            </template>
+            <!-- Messaggio bot (sinistra) -->
+            <template x-if="!msg.content.startsWith('[') && msg.role==='assistant'">
+              <div class="flex justify-start">
+                <div class="max-w-[72%] space-y-1">
+                  <div class="rounded-2xl px-4 py-2.5 text-sm leading-relaxed" style="background:#22263a;color:#d1d5db;border-radius:1rem 1rem 1rem 0.25rem;" x-text="msg.content"></div>
+                  <div class="text-xs pl-1" style="color:#4b5563;" x-text="formatDate(msg.created_at)"></div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div><!-- end tab chat -->
+
     </div>
   </div>
 </div>
@@ -451,6 +507,8 @@ function dashboard() {
     metrics: [],
     suggestions: [],
     selectedCustomer: null,
+    selectedMessages: [],
+    modalTab: 'profile',
     searchQuery: '',
     filterStage: '',
     filterStatus: '',
@@ -574,10 +632,20 @@ function dashboard() {
     },
 
     async openCustomer(userId) {
+      this.modalTab = 'profile';
+      this.selectedMessages = [];
       try {
-        const r = await fetch(`/api/customers/${userId}`);
-        this.selectedCustomer = r.ok ? await r.json() : (this.customers.find(c=>c.user_id==userId)||null);
-      } catch { this.selectedCustomer = this.customers.find(c=>c.user_id==userId)||null; }
+        const [rCustomer, rMessages] = await Promise.allSettled([
+          fetch(`/api/customers/${userId}`).then(r=>r.ok?r.json():null),
+          fetch(`/api/customers/${userId}/messages`).then(r=>r.ok?r.json():[]),
+        ]);
+        this.selectedCustomer = rCustomer.status==='fulfilled' && rCustomer.value
+          ? rCustomer.value
+          : (this.customers.find(c=>c.user_id==userId)||null);
+        this.selectedMessages = rMessages.status==='fulfilled' ? (rMessages.value||[]) : [];
+      } catch {
+        this.selectedCustomer = this.customers.find(c=>c.user_id==userId)||null;
+      }
     },
 
     async saveNote(userId, note) {

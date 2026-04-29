@@ -171,3 +171,25 @@ async def set_lead_status(user_id: int, status: str) -> None:
         .execute()
     )
     logger.info("status=%s per user %d", status, user_id)
+
+
+async def save_message(user_id: int, role: str, content: str) -> None:
+    """Persiste un messaggio su Supabase per la dashboard conversazioni.
+
+    Migration richiesta (una tantum su Supabase):
+        CREATE TABLE IF NOT EXISTS messages (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS messages_user_id_idx
+            ON messages(user_id, created_at DESC);
+    """
+    await _with_supabase_retry(
+        lambda sb: sb.table("messages")
+        .insert({"user_id": user_id, "role": role, "content": content})
+        .execute()
+    )
+    logger.debug("saved message role=%s for user %d", role, user_id)

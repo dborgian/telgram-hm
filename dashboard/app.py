@@ -311,6 +311,25 @@ async def stage_suggestions(_: str = Depends(require_auth)):
         raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
+@app.get("/api/customers/{user_id}/messages")
+async def get_messages(user_id: int, _: str = Depends(require_auth)):
+    try:
+        sb = await get_client()
+        res = await (
+            sb.table("messages")
+            .select("id, role, content, created_at")
+            .eq("user_id", user_id)
+            .order("created_at", desc=False)
+            .limit(200)
+            .execute()
+        )
+        return res.data
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
 @app.patch("/api/customers/{user_id}/notes")
 async def update_notes(user_id: int, body: NotesUpdate, _: str = Depends(require_auth)):
     try:
