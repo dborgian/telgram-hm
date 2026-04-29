@@ -565,7 +565,7 @@ function dashboard() {
       // Re-render chart whenever user returns to dashboard view
       this.$watch('view', val => {
         if (val === 'dashboard' && this.convData.length) {
-          this.$nextTick(() => this.renderChart());
+          setTimeout(() => this.renderChart(), 50);
         }
       });
     },
@@ -590,7 +590,8 @@ function dashboard() {
           const rc = await fetch('/api/analytics/conversations');
           if (rc.ok) {
             this.convData = await rc.json();
-            this.$nextTick(() => this.renderChart());
+            // setTimeout ensures browser layout is complete before Chart.js renders
+            setTimeout(() => this.renderChart(), 150);
           }
         } catch(e) { console.error('chart:', e); }
       } catch(e) { console.error('loadAll:',e); }
@@ -716,12 +717,7 @@ function dashboard() {
 
     renderChart() {
       const canvas = document.getElementById('convChart');
-      if (!canvas) return;
-      // If canvas has no dimensions (parent still hidden / layout not done), retry
-      if (canvas.offsetWidth === 0) {
-        requestAnimationFrame(() => this.renderChart());
-        return;
-      }
+      if (!canvas || canvas.offsetWidth === 0) return;
       if (this.convChart) { this.convChart.destroy(); }
       this.convChart = new Chart(canvas, {
         type: 'line',
