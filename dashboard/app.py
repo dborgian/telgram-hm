@@ -122,34 +122,12 @@ class ClientPreview(ClientCreate):
 
 class ClientUpdate(BaseModel):
     name: str | None = None
-    coach_name: str | None = None
-    specialization: str | None = None
-    target_description: str | None = None
-    tone: str | None = None
-    offer_description: str | None = None
-    price_display: str | None = None
-    budget_min_euros: int | None = None
-    guardrails: str | None = None
-    vsl_url: str | None = None
-    calendly_url: str | None = None
-    is_active: bool | None = None
-
-
-class ClientUpdate(BaseModel):
-    name: str | None = None
-    coach_name: str | None = None
-    specialization: str | None = None
-    target_description: str | None = None
-    tone: str | None = None
-    offer_description: str | None = None
-    price_display: str | None = None
-    budget_min_euros: int | None = None
-    guardrails: str | None = None
     vsl_url: str | None = None
     calendly_url: str | None = None
     system_prompt_base: str | None = None
     stage_instructions: dict | None = None
     brand_voice: dict | None = None
+    icp_rules: dict | None = None
     is_active: bool | None = None
 
 
@@ -459,8 +437,8 @@ async def update_status(
 
 def _slugify(text: str) -> str:
     text = text.lower().strip()
-    text = re.sub(r"[^\w\s-]", "", text)
-    text = re.sub(r"[\s_-]+", "-", text)
+    text = re.sub(r"[^\w\s]", "", text)
+    text = re.sub(r"\s+", "_", text)
     return text[:50]
 
 
@@ -474,7 +452,11 @@ async def preview_client(body: ClientPreview, _: str = Depends(require_auth)):
     try:
         form_data = body.model_dump()
         result = await generate_client_config(form_data)
-        return {"system_prompt_base": result.get("system_prompt_base", ""), "ok": True}
+        return {
+            "system_prompt_base": result.get("system_prompt_base", ""),
+            "stage_instructions": result.get("stage_instructions", {}),
+            "ok": True,
+        }
     except HTTPException:
         raise
     except Exception as exc:
@@ -511,19 +493,21 @@ async def create_client(body: ClientCreate, _: str = Depends(require_auth)):
             "client_id": client_id,
             "name": body.name,
             "slug": slug,
-            "coach_name": body.coach_name,
-            "specialization": body.specialization,
-            "target_description": body.target_description,
-            "tone": body.tone,
-            "offer_description": body.offer_description,
-            "price_display": body.price_display,
-            "budget_min_euros": body.budget_min_euros,
-            "guardrails": body.guardrails,
-            "vsl_base_url": body.vsl_url,
-            "calendly_base_url": body.calendly_url,
+            "vsl_url": body.vsl_url,
+            "calendly_url": body.calendly_url,
+            "guardrails": {"text": body.guardrails} if body.guardrails else {},
             "system_prompt_base": generated.get("system_prompt_base", ""),
             "stage_instructions": generated.get("stage_instructions", {}),
             "brand_voice": generated.get("brand_voice", {}),
+            "icp_rules": {
+                "coach_name": body.coach_name,
+                "specialization": body.specialization,
+                "target_description": body.target_description,
+                "tone": body.tone,
+                "offer_description": body.offer_description,
+                "price_display": body.price_display,
+                "budget_min_euros": body.budget_min_euros,
+            },
             "is_active": True,
         }
 
