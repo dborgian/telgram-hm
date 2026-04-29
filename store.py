@@ -77,10 +77,12 @@ async def upsert_customer(
     user_id: int,
     first_name: str | None,
     username: str | None,
+    client_id: str = "",
 ) -> None:
     """Crea il profilo se non esiste, aggiorna last_seen."""
     payload = {
         "user_id": user_id,
+        "client_id": client_id or config.DEFAULT_CLIENT_ID,
         "first_name": first_name,
         "username": username,
         "last_seen": _now_iso(),
@@ -113,12 +115,14 @@ async def get_customer(user_id: int) -> dict | None:
     return profile
 
 
-async def update_stage(user_id: int, stage: str) -> None:
+async def update_stage(user_id: int, stage: str, client_id: str = "") -> None:
     """Aggiorna lo stage della conversazione."""
+    _cid = client_id or config.DEFAULT_CLIENT_ID
     await _with_supabase_retry(
         lambda sb: sb.table("conversation_state")
         .upsert(
-            {"user_id": user_id, "conversation_stage": stage}, on_conflict="user_id"
+            {"user_id": user_id, "client_id": _cid, "conversation_stage": stage},
+            on_conflict="user_id",
         )
         .execute()
     )
@@ -173,7 +177,9 @@ async def set_lead_status(user_id: int, status: str) -> None:
     logger.info("status=%s per user %d", status, user_id)
 
 
-async def save_message(user_id: int, role: str, content: str) -> None:
+async def save_message(
+    user_id: int, role: str, content: str, client_id: str = ""
+) -> None:
     """Persiste un messaggio su Supabase per la dashboard conversazioni.
 
     Migration richiesta (una tantum su Supabase):
@@ -189,7 +195,14 @@ async def save_message(user_id: int, role: str, content: str) -> None:
     """
     await _with_supabase_retry(
         lambda sb: sb.table("messages")
-        .insert({"user_id": user_id, "role": role, "content": content})
+        .insert(
+            {
+                "user_id": user_id,
+                "client_id": client_id or config.DEFAULT_CLIENT_ID,
+                "role": role,
+                "content": content,
+            }
+        )
         .execute()
     )
     logger.debug("saved message role=%s for user %d", role, user_id)
