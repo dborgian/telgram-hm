@@ -613,15 +613,17 @@ function dashboard() {
     },
 
     get funnelRows() {
-      if (Array.isArray(this.funnel)) return this.funnel;
+      // API returns { stage_counts: {stage_1_greet: N, ...}, ... }
+      const source = this.funnel.stage_counts ?? this.funnel;
+      if (Array.isArray(source)) return source;
       const order = Object.keys(STAGE_LABELS);
-      return Object.entries(this.funnel)
+      return Object.entries(source)
         .filter(([k])=>k.startsWith('stage_'))
         .sort(([a],[b])=>{
           const ia=order.indexOf(a), ib=order.indexOf(b);
           return (ia===-1?99:ia)-(ib===-1?99:ib);
         })
-        .map(([key,val])=>({key, count:typeof val==='object'?(val.count??val.total??0):(val??0)}));
+        .map(([key,val])=>({key, count:typeof val==='object'?(val.count??val.total??0):(Number(val)||0)}));
     },
 
     get funnelMaxCount() { return Math.max(...this.funnelRows.map(r=>r.count),1); },

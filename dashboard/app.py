@@ -216,19 +216,16 @@ async def funnel(_: str = Depends(require_auth)):
 
 @app.get("/api/analytics/conversations")
 async def analytics_conversations(_: str = Depends(require_auth)):
-    """Conversations per day (last 30 days) based on customers.first_seen."""
+    """Conversations active per day (last 30 days) based on customers.last_seen."""
     try:
         sb = await get_client()
         cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
         res = await (
-            sb.table("customers")
-            .select("first_seen")
-            .gte("first_seen", cutoff)
-            .execute()
+            sb.table("customers").select("last_seen").gte("last_seen", cutoff).execute()
         )
         counts: dict[str, int] = {}
         for row in res.data:
-            fs = row.get("first_seen")
+            fs = row.get("last_seen")
             if not fs:
                 continue
             day = fs[:10]  # "YYYY-MM-DD"
