@@ -122,6 +122,7 @@
             class="text-xs text-center py-2 mb-2" style="color:#6b7280;">
             Nessuna attività registrata negli ultimi 30 giorni
           </div>
+          <div class="text-xs mb-1" style="color:#ef4444;" x-text="chartDbg"></div>
           <div style="position:relative;height:180px;">
             <canvas id="convChart"></canvas>
           </div>
@@ -527,6 +528,7 @@ function dashboard() {
     lastRefresh: null,
     convChart: null,
     convData: [],
+    chartDbg: 'attesa dati...',
     STAGE_LABELS,
 
     navItems: [
@@ -727,7 +729,9 @@ function dashboard() {
 
     renderChart() {
       const canvas = document.getElementById('convChart');
-      if (!canvas || canvas.offsetWidth === 0) return;
+      if (!canvas) { this.chartDbg = 'ERR: canvas non trovato'; return; }
+      if (canvas.offsetWidth === 0) { this.chartDbg = 'ERR: canvas width=0 h=' + canvas.offsetHeight; return; }
+      this.chartDbg = 'OK: ' + canvas.offsetWidth + 'x' + canvas.offsetHeight + ' pts=' + this.convData.length;
       if (this.convChart) { this.convChart.destroy(); }
       this.convChart = new Chart(canvas, {
         type: 'line',
