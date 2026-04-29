@@ -113,7 +113,15 @@
         </div>
         <!-- Line Chart: Conversazioni nel tempo -->
         <div class="rounded-xl p-5" style="background:#1a1d27;border:1px solid #2d3248;">
-          <h2 class="text-sm font-semibold mb-4" style="color:#d1d5db;">Volume Conversazioni (ultimi 30 giorni)</h2>
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-sm font-semibold" style="color:#d1d5db;">Volume Conversazioni (ultimi 30 giorni)</h2>
+            <span class="text-xs" style="color:#4b5563;"
+              x-text="convData.length ? 'totale: ' + convData.reduce((s,d)=>s+d.count,0) + ' attività' : 'caricamento...'"></span>
+          </div>
+          <div x-show="convData.length && convData.every(d=>d.count===0)"
+            class="text-xs text-center py-2 mb-2" style="color:#6b7280;">
+            Nessuna attività registrata negli ultimi 30 giorni
+          </div>
           <div style="position:relative;height:180px;">
             <canvas id="convChart"></canvas>
           </div>
