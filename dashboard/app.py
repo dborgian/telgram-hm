@@ -412,6 +412,53 @@ async def update_notes(user_id: int, body: NotesUpdate, _: str = Depends(require
         raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
+class SendMessageRequest(BaseModel):
+    message: str
+    client_id: str = ""
+
+
+@app.post("/api/customers/{user_id}/send_message")
+async def send_message_to_user(
+    user_id: int, body: SendMessageRequest, _: str = Depends(require_auth)
+):
+    """Invia un messaggio manuale a un utente Telegram via outbox Supabase."""
+    if not body.message.strip():
+        raise HTTPException(status_code=400, detail="Messaggio vuoto")
+    if len(body.message) > 4096:
+        raise HTTPException(
+            status_code=400, detail="Messaggio troppo lungo (max 4096 char)"
+        )
+    try:
+        import sys
+
+        parent_dir = str(Path(__file__).parent.parent)
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
+        import store as _store
+        import config as _config
+
+        # Resolve client_id from customers table if not provided — fixes multi-client bug
+        client_id = body.client_id
+        if not client_id:
+            sb = await get_client()
+            res = await (
+                sb.table("customers")
+                .select("client_id")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            client_id = ((res.data or {}).get("client_id")) or _config.DEFAULT_CLIENT_ID
+        record_id = await _store.insert_outbox_message(
+            user_id, client_id, body.message.strip()
+        )
+        return {"ok": True, "record_id": record_id}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Errore invio messaggio") from exc
+
+
 @app.patch("/api/customers/{user_id}/status")
 async def update_status(
     user_id: int, body: StatusUpdate, _: str = Depends(require_auth)
@@ -543,8 +590,143 @@ async def update_client(slug: str, body: ClientUpdate, _: str = Depends(require_
         res = await sb.table("client_config").update(updates).eq("slug", slug).execute()
         if not res.data:
             raise HTTPException(status_code=404, detail="Client not found")
+        # Invalida cache Redis config:{client_id} così il bot usa subito il nuovo prompt
+        try:
+            import sys as _sys
+
+            _parent = str(Path(__file__).parent.parent)
+            if _parent not in _sys.path:
+                _sys.path.insert(0, _parent)
+            import cache as _cache
+
+            client_id = res.data[0].get("client_id", "")
+            if client_id:
+                await _cache._with_redis_retry(
+                    lambda r: r.delete(f"config:{client_id}")
+                )
+        except Exception:
+            pass  # cache invalidation best-effort
         return {"ok": True}
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+# ---------------------------------------------------------------------------
+# Fase 3 — AI Prompt Editor
+# ---------------------------------------------------------------------------
+
+
+class AISuggestRequest(BaseModel):
+    field: str
+    instruction: str
+    current_value: str
+
+
+@app.get("/clients/{slug}/prompt-editor", response_class=HTMLResponse)
+async def prompt_editor_page(
+    request: Request, slug: str, _: str = Depends(require_auth)
+):
+    return templates.TemplateResponse(
+        request=request, name="prompt_editor.html", context={"slug": slug}
+    )
+
+
+@app.get("/api/clients/{slug}/config")
+async def get_client_config_detail(slug: str, _: str = Depends(require_auth)):
+    """Restituisce system_prompt_base, stage_instructions e brand_voice per l'editor."""
+    try:
+        sb = await get_client()
+        res = await (
+            sb.table("client_config")
+            .select(
+                "client_id, name, slug, system_prompt_base, stage_instructions, brand_voice, icp_rules"
+            )
+            .eq("slug", slug)
+            .maybe_single()
+            .execute()
+        )
+        if res.data is None:
+            raise HTTPException(status_code=404, detail="Client not found")
+        return res.data
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+@app.post("/api/clients/{slug}/ai-suggest")
+async def ai_suggest(slug: str, body: AISuggestRequest, _: str = Depends(require_auth)):
+    """Usa Claude per migliorare un campo del prompt secondo l'istruzione dell'utente."""
+    import anthropic as _anthropic
+
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY non configurata")
+    if not body.instruction.strip():
+        raise HTTPException(status_code=400, detail="Istruzione vuota")
+    if len(body.current_value) > 20000:
+        raise HTTPException(status_code=400, detail="Testo troppo lungo")
+
+    try:
+        # Load brand_voice for context so Claude knows the tone-of-voice
+        brand_voice_ctx = ""
+        try:
+            sb = await get_client()
+            cfg_res = await (
+                sb.table("client_config")
+                .select("brand_voice")
+                .eq("slug", slug)
+                .maybe_single()
+                .execute()
+            )
+            bv = (cfg_res.data or {}).get("brand_voice") or {}
+            if bv:
+                tone = bv.get("tone", "")
+                phrases_use = ", ".join(bv.get("phrases_use") or [])
+                phrases_avoid = ", ".join(bv.get("phrases_avoid") or [])
+                parts = []
+                if tone:
+                    parts.append(f"Tone: {tone}")
+                if phrases_use:
+                    parts.append(f"Frasi da usare: {phrases_use}")
+                if phrases_avoid:
+                    parts.append(f"Frasi da evitare: {phrases_avoid}")
+                if parts:
+                    brand_voice_ctx = (
+                        "BRAND VOICE DEL CLIENTE:\n" + "\n".join(parts) + "\n\n"
+                    )
+        except Exception:
+            pass  # brand_voice context is best-effort
+
+        aclient = _anthropic.AsyncAnthropic(api_key=api_key)
+        field_label = body.field.replace("stage_instructions.", "Stage: ").replace(
+            "system_prompt_base", "System Prompt"
+        )
+
+        message = await aclient.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=2000,
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"Sei un esperto di copywriting per sales bot AI in italiano.\n\n"
+                        f"{brand_voice_ctx}"
+                        f"Campo da modificare: {field_label}\n\n"
+                        f"TESTO ATTUALE:\n{body.current_value}\n\n"
+                        f"ISTRUZIONE DI MODIFICA: {body.instruction}\n\n"
+                        f"Riscrivi il testo applicando l'istruzione. "
+                        f"Mantieni la stessa struttura e lunghezza approssimativa. "
+                        f"Rispondi SOLO con il testo modificato, senza spiegazioni o prefissi."
+                    ),
+                }
+            ],
+        )
+        suggested = message.content[0].text.strip()
+        return {"suggested": suggested, "ok": True}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Errore AI: {str(exc)[:200]}"
+        ) from exc

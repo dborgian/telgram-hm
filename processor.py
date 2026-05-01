@@ -66,6 +66,59 @@ def _split_reply(text: str) -> list[str]:
     return chunks if chunks else [text]
 
 
+SUMMARY_STAGES = {
+    "stage_3_post_video",
+    "stage_4_answering_questions",
+    "stage_5_booking",
+    "stage_6_verifying",
+    "stage_7_rescheduling",
+    "stage_8_postbooking",
+    "stage_9_uninterested",
+    "stage_10_budget_questioning",
+}
+
+
+async def _generate_and_save_summary(
+    user_id: int, history: list, last_user_msg: str, last_reply: str, client_id: str
+) -> None:
+    """Genera un riassunto di 1-2 righe del profilo utente con OpenAI."""
+    try:
+        import openai as _openai
+
+        recent = history[-6:] if len(history) >= 6 else history
+        messages_text = "\n".join(
+            f"{t['role'].upper()}: {t['content']}" for t in recent
+        )
+        client_oai = _openai.AsyncOpenAI()
+        resp = await client_oai.chat.completions.create(
+            model="gpt-4o-mini",
+            temperature=0.3,
+            max_tokens=80,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Sei un assistente che riassume brevemente il profilo di un lead. "
+                        "Scrivi 1-2 frasi in italiano che descrivono chi è, cosa vuole e il suo stato emotivo/interesse. "
+                        "Sii concreto e diretto. Nessun bullet point."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Riassumi questo lead basandoti sulla conversazione:\n{messages_text}\nUltimo messaggio utente: {last_user_msg}",
+                },
+            ],
+        )
+        summary = resp.choices[0].message.content.strip()
+        if summary:
+            await db.save_user_summary(user_id, summary, client_id=client_id)
+            logger.info(
+                "user_summary aggiornato per user %d: %s", user_id, summary[:60]
+            )
+    except Exception as e:
+        logger.warning("_generate_and_save_summary fallita per user %d: %s", user_id, e)
+
+
 async def process_conversation(
     client,
     user_id: int,
@@ -182,6 +235,15 @@ async def process_conversation(
             return
 
         await db.save_turn(user_id, combined_text, reply, client_id=effective_client_id)
+
+        # Genera/aggiorna user_summary ogni 3 turni, dallo stage_3 in poi
+        turn_count = (customer or {}).get("turn_count", 0)
+        if stage in SUMMARY_STAGES and (turn_count + 1) % 3 == 0:
+            asyncio.ensure_future(
+                _generate_and_save_summary(
+                    user_id, ctx_history, combined_text, reply, effective_client_id
+                )
+            )
 
         # stage_9: attendi 45s prima di inviare (replica n8n Wait node)
         if stage == "stage_9_uninterested":

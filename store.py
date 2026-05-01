@@ -223,6 +223,72 @@ async def set_awaiting_reply(user_id: int, value: bool) -> None:
     logger.debug("awaiting_reply=%s per user %d", value, user_id)
 
 
+async def save_user_summary(user_id: int, summary: str) -> None:
+    """Salva il riassunto AI del profilo utente su Supabase."""
+    await _with_supabase_retry(
+        lambda sb: sb.table("customers")
+        .update({"user_summary": summary})
+        .eq("user_id", user_id)
+        .execute()
+    )
+    logger.debug("user_summary aggiornato per user %d", user_id)
+
+
+async def insert_outbox_message(user_id: int, client_id: str, message: str) -> str:
+    """Inserisce un messaggio in outbox. Ritorna l'id del record."""
+    import uuid as _uuid
+
+    record_id = str(_uuid.uuid4())
+    await _with_supabase_retry(
+        lambda sb: sb.table("outbox")
+        .insert(
+            {
+                "id": record_id,
+                "user_id": user_id,
+                "client_id": client_id,
+                "message": message,
+            }
+        )
+        .execute()
+    )
+    return record_id
+
+
+async def get_pending_outbox(client_id: str, limit: int = 20) -> list[dict]:
+    """Legge messaggi pending per un client."""
+    res = await _with_supabase_retry(
+        lambda sb: sb.table("outbox")
+        .select("*")
+        .eq("client_id", client_id)
+        .eq("status", "pending")
+        .order("created_at")
+        .limit(limit)
+        .execute()
+    )
+    return res.data or []
+
+
+async def mark_outbox_sent(record_id: str) -> None:
+    """Marca un messaggio outbox come inviato (solo se ancora pending — previene doppio-send)."""
+    await _with_supabase_retry(
+        lambda sb: sb.table("outbox")
+        .update({"status": "sent", "sent_at": _now_iso()})
+        .eq("id", record_id)
+        .eq("status", "pending")
+        .execute()
+    )
+
+
+async def mark_outbox_failed(record_id: str, error: str) -> None:
+    """Marca un messaggio outbox come fallito."""
+    await _with_supabase_retry(
+        lambda sb: sb.table("outbox")
+        .update({"status": "failed", "error_message": error[:500]})
+        .eq("id", record_id)
+        .execute()
+    )
+
+
 async def set_hot_lead(user_id: int) -> None:
     """Marca il lead come hot nel DB (segnale di close rilevato).
 

@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="it" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Prompt Editor — HM Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    body { background-color: #0f1117; color: #f3f4f6; }
+    .scrollbar-thin::-webkit-scrollbar { width: 4px; height: 4px; }
+    .scrollbar-thin::-webkit-scrollbar-track { background: #1a1d27; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #3d4260; border-radius: 2px; }
+  </style>
+</head>
+<body class="h-full">
+
+<div x-data="promptEditor()" x-init="init()" class="min-h-screen" style="background:#0f1117;color:#f3f4f6;">
+
+  <!-- Header -->
+  <div class="px-6 py-4 flex items-center gap-4" style="background:#1a1d27;border-bottom:1px solid #2d3248;">
+    <a href="/" class="text-sm no-underline" style="color:#818cf8;">← Dashboard</a>
+    <div class="w-px h-4" style="background:#2d3248;"></div>
+    <h1 class="text-sm font-semibold text-white">Prompt Editor</h1>
+    <span x-show="clientData" x-text="clientData?.name" class="text-sm" style="color:#9ca3af;"></span>
+    <div class="ml-auto flex items-center gap-3">
+      <span x-show="saveStatus" x-text="saveStatus" class="text-xs"
+        :style="saveStatus.startsWith('✓') ? 'color:#34d399' : 'color:#f87171'"></span>
+      <button @click="saveAll()" :disabled="saving || loading"
+        class="px-4 py-1.5 rounded-lg text-xs font-medium"
+        style="background:#4f46e5;color:white;"
+        :style="(saving || loading) ? 'opacity:0.5;' : ''">
+        <span x-show="!saving">Salva tutto</span>
+        <span x-show="saving">Salvataggio...</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Loading -->
+  <div x-show="loading" class="flex items-center justify-center h-64">
+    <div class="text-sm" style="color:#9ca3af;">Caricamento configurazione...</div>
+  </div>
+
+  <!-- Main content -->
+  <div x-show="!loading" x-cloak class="flex h-[calc(100vh-57px)]">
+
+    <!-- Left sidebar — section list -->
+    <div class="w-56 flex-shrink-0 overflow-y-auto p-3 space-y-1 scrollbar-thin" style="background:#1a1d27;border-right:1px solid #2d3248;">
+      <template x-for="section in sections" :key="section.key">
+        <button @click="selectedSection = section.key"
+          class="w-full text-left px-3 py-2 rounded-lg text-xs font-medium transition-all"
+          :style="selectedSection === section.key
+            ? 'background:rgba(79,70,229,0.15);color:#818cf8;border:1px solid rgba(79,70,229,0.3);'
+            : 'color:#9ca3af;border:1px solid transparent;'"
+          x-text="section.label">
+        </button>
+      </template>
+    </div>
+
+    <!-- Right — editor + AI panel -->
+    <div class="flex-1 flex flex-col overflow-hidden p-6 gap-4">
+
+      <!-- Editor area -->
+      <div class="flex-1 min-h-0 flex flex-col gap-2">
+        <div class="text-xs font-semibold" style="color:#9ca3af;" x-text="sections.find(s=>s.key===selectedSection)?.label || ''"></div>
+        <textarea x-model="currentValue" class="flex-1 rounded-xl px-4 py-3 text-sm font-mono resize-none scrollbar-thin"
+          style="background:#1a1d27;border:1px solid #2d3248;color:#e5e7eb;outline:none;line-height:1.6;"
+          placeholder="Nessun contenuto"></textarea>
+      </div>
+
+      <!-- AI Suggestion panel -->
+      <div class="rounded-xl p-4 space-y-3" style="background:#1a1d27;border:1px solid #2d3248;">
+        <div class="text-xs font-semibold" style="color:#818cf8;">MIGLIORA CON AI</div>
+        <div class="flex gap-2">
+          <input x-model="aiInstruction" type="text"
+            placeholder="Es: rendi il tono più urgente e diretto"
+            class="flex-1 rounded-lg px-3 py-2 text-sm"
+            style="background:#22263a;border:1px solid #3d4260;color:#e5e7eb;outline:none;"
+            @keydown.enter="suggestWithAI()">
+          <button @click="suggestWithAI()" :disabled="aiLoading || !aiInstruction.trim()"
+            class="px-4 py-2 rounded-lg text-xs font-medium flex-shrink-0"
+            style="background:#4f46e5;color:white;"
+            :style="(aiLoading || !aiInstruction.trim()) ? 'opacity:0.5;' : ''">
+            <span x-show="!aiLoading">Migliora</span>
+            <span x-show="aiLoading">AI...</span>
+          </button>
+        </div>
+
+        <!-- AI suggestion result -->
+        <div x-show="aiSuggested" x-cloak class="space-y-2">
+          <div class="text-xs" style="color:#9ca3af;">Suggerimento AI:</div>
+          <div class="rounded-lg p-3 text-sm font-mono whitespace-pre-wrap scrollbar-thin"
+            style="background:#22263a;border:1px solid #3d4260;color:#e5e7eb;max-height:200px;overflow-y:auto;"
+            x-text="aiSuggested"></div>
+          <div class="flex gap-2">
+            <button @click="acceptSuggestion()"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium"
+              style="background:#065f46;color:#34d399;">Accetta</button>
+            <button @click="rejectSuggestion()"
+              class="px-3 py-1.5 rounded-lg text-xs font-medium"
+              style="background:#7f1d1d;color:#f87171;">Rifiuta</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+function promptEditor() {
+  return {
+    slug: '{{ slug }}',
+    clientData: null,
+    loading: true,
+    saving: false,
+    selectedSection: 'system_prompt_base',
+    sections: [],
+    editedValues: {},
+    aiInstruction: '',
+    aiLoading: false,
+    aiSuggested: '',
+    aiSuggestedKey: '',
+    saveStatus: '',
+
+    async init() {
+      await this.loadConfig();
+    },
+
+    async loadConfig() {
+      this.loading = true;
+      try {
+        const r = await fetch(`/api/clients/${this.slug}/config`);
+        if (!r.ok) throw new Error('Errore caricamento');
+        this.clientData = await r.json();
+        this.buildSections();
+      } catch(e) {
+        alert('Errore: ' + e.message);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    buildSections() {
+      this.sections = [];
+      if (this.clientData.system_prompt_base) {
+        const key = 'system_prompt_base';
+        this.sections.push({key, label: 'System Prompt', type: 'text'});
+        this.editedValues[key] = this.clientData.system_prompt_base;
+      }
+      const si = this.clientData.stage_instructions || {};
+      const stageLabels = {
+        stage_1_greet: '1 — Benvenuto',
+        stage_2_video: '2 — Video VSL',
+        stage_3_post_video: '3 — Post Video',
+        stage_4_answering_questions: '4 — Prezzo',
+        stage_5_booking: '5 — Prenotazione',
+        stage_6_verifying: '6 — Verifica',
+        stage_7_rescheduling: '7 — Reschedule',
+        stage_8_postbooking: '8 — Post-Call',
+        stage_9_uninterested: '9 — Non interessato',
+        stage_10_budget_questioning: '10 — Budget'
+      };
+      for (const [stageKey, content] of Object.entries(si)) {
+        const key = `stage_instructions.${stageKey}`;
+        this.sections.push({key, label: stageLabels[stageKey] || stageKey, type: 'stage'});
+        this.editedValues[key] = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+      }
+      // Brand voice sections
+      const bv = this.clientData.brand_voice || {};
+      this.sections.push({key: 'brand_voice.tone', label: 'BV — Tono', type: 'brand_voice'});
+      this.editedValues['brand_voice.tone'] = bv.tone || '';
+      const phrasesUse = (bv.phrases_use || []).join('\n');
+      this.sections.push({key: 'brand_voice.phrases_use', label: 'BV — Frasi da usare', type: 'brand_voice'});
+      this.editedValues['brand_voice.phrases_use'] = phrasesUse;
+      const phrasesAvoid = (bv.phrases_avoid || []).join('\n');
+      this.sections.push({key: 'brand_voice.phrases_avoid', label: 'BV — Frasi da evitare', type: 'brand_voice'});
+      this.editedValues['brand_voice.phrases_avoid'] = phrasesAvoid;
+      if (this.sections.length > 0) this.selectedSection = this.sections[0].key;
+    },
+
+    get currentValue() {
+      return this.editedValues[this.selectedSection] || '';
+    },
+    set currentValue(v) {
+      this.editedValues[this.selectedSection] = v;
+    },
+
+    async suggestWithAI() {
+      if (!this.aiInstruction.trim()) return;
+      this.aiLoading = true;
+      this.aiSuggested = '';
+      this.aiSuggestedKey = '';
+      try {
+        const r = await fetch(`/api/clients/${this.slug}/ai-suggest`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            field: this.selectedSection,
+            instruction: this.aiInstruction,
+            current_value: this.currentValue
+          })
+        });
+        if (!r.ok) throw new Error((await r.json()).detail);
+        const data = await r.json();
+        this.aiSuggested = data.suggested;
+        this.aiSuggestedKey = this.selectedSection;
+      } catch(e) {
+        alert('Errore AI: ' + e.message);
+      } finally {
+        this.aiLoading = false;
+      }
+    },
+
+    acceptSuggestion() {
+      if (this.aiSuggestedKey) {
+        this.editedValues[this.aiSuggestedKey] = this.aiSuggested;
+      }
+      this.aiSuggested = '';
+      this.aiSuggestedKey = '';
+      this.aiInstruction = '';
+    },
+
+    rejectSuggestion() {
+      this.aiSuggested = '';
+      this.aiSuggestedKey = '';
+    },
+
+    async saveAll() {
+      this.saving = true;
+      this.saveStatus = '';
+      try {
+        const updates = {};
+        if ('system_prompt_base' in this.editedValues) {
+          updates.system_prompt_base = this.editedValues['system_prompt_base'];
+        }
+        const stageInstructions = {};
+        for (const [key, val] of Object.entries(this.editedValues)) {
+          if (key.startsWith('stage_instructions.')) {
+            const stageKey = key.replace('stage_instructions.', '');
+            stageInstructions[stageKey] = val;
+          }
+        }
+        if (Object.keys(stageInstructions).length > 0) {
+          updates.stage_instructions = stageInstructions;
+        }
+        // Collect brand_voice changes
+        const bvTone = this.editedValues['brand_voice.tone'];
+        const bvUse = this.editedValues['brand_voice.phrases_use'];
+        const bvAvoid = this.editedValues['brand_voice.phrases_avoid'];
+        if (bvTone !== undefined || bvUse !== undefined || bvAvoid !== undefined) {
+          updates.brand_voice = {
+            tone: bvTone || '',
+            phrases_use: bvUse ? bvUse.split('\n').map(s => s.trim()).filter(Boolean) : [],
+            phrases_avoid: bvAvoid ? bvAvoid.split('\n').map(s => s.trim()).filter(Boolean) : [],
+          };
+        }
+        const r = await fetch(`/api/clients/${this.slug}`, {
+          method: 'PATCH',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(updates)
+        });
+        if (!r.ok) throw new Error((await r.json()).detail);
+        this.saveStatus = 'Salvato con successo';
+        setTimeout(() => this.saveStatus = '', 3000);
+      } catch(e) {
+        this.saveStatus = 'Errore: ' + e.message;
+      } finally {
+        this.saving = false;
+      }
+    }
+  };
+}
+</script>
+</body>
+</html>
