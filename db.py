@@ -61,8 +61,8 @@ async def save_turn(
     await cache.save_turn(cid, user_id, user_msg, assistant_msg)
     await asyncio.gather(
         store.increment_turn_count(user_id),
-        store.save_message(user_id, "user", user_msg),
-        store.save_message(user_id, "assistant", assistant_msg),
+        store.save_message(user_id, "user", user_msg, client_id=cid),
+        store.save_message(user_id, "assistant", assistant_msg, client_id=cid),
         return_exceptions=True,  # messages table potrebbe non esistere ancora
     )
 
@@ -75,7 +75,7 @@ async def upsert_customer(
 ) -> None:
     """Crea/aggiorna profilo su Supabase e invalida cache Redis."""
     cid = client_id or config.DEFAULT_CLIENT_ID
-    await store.upsert_customer(user_id, first_name, username)
+    await store.upsert_customer(user_id, first_name, username, client_id=cid)
     await cache.invalidate_profile(cid, user_id)
 
 
@@ -90,7 +90,7 @@ async def get_customer(user_id: int, client_id: str = "") -> dict | None:
     if profile is not None:
         return profile
 
-    profile = await store.get_customer(user_id)
+    profile = await store.get_customer(user_id, client_id=cid)
     if profile is not None:
         await cache.cache_profile(cid, user_id, profile)
     return profile
@@ -99,7 +99,7 @@ async def get_customer(user_id: int, client_id: str = "") -> dict | None:
 async def update_stage(user_id: int, stage: str, client_id: str = "") -> None:
     """Aggiorna stage su Supabase e invalida cache Redis."""
     cid = client_id or config.DEFAULT_CLIENT_ID
-    await store.update_stage(user_id, stage)
+    await store.update_stage(user_id, stage, client_id=cid)
     await cache.invalidate_profile(cid, user_id)
 
 
@@ -113,7 +113,7 @@ async def reset_user(user_id: int, client_id: str = "") -> None:
     cid = client_id or config.DEFAULT_CLIENT_ID
     await cache.clear_history(cid, user_id)
     await cache.invalidate_profile(cid, user_id)
-    await store.update_stage(user_id, "stage_1_greet")
+    await store.update_stage(user_id, "stage_1_greet", client_id=cid)
 
 
 async def set_call_booked(
@@ -121,26 +121,34 @@ async def set_call_booked(
 ) -> None:
     """Simula una prenotazione Calendly senza toccare Calendly reale."""
     cid = client_id or config.DEFAULT_CLIENT_ID
-    await store.set_call_booked(user_id, booked)
+    await store.set_call_booked(user_id, booked, client_id=cid)
     await cache.invalidate_profile(cid, user_id)
 
 
-async def set_lead_status(user_id: int, status: str) -> None:
+async def set_lead_status(user_id: int, status: str, client_id: str = "") -> None:
     """Aggiorna lo status del lead su Supabase (es. 'LL' = Lost Lead)."""
-    await store.set_lead_status(user_id, status)
+    cid = client_id or config.DEFAULT_CLIENT_ID
+    await store.set_lead_status(user_id, status, client_id=cid)
 
 
 async def set_awaiting_reply(user_id: int, value: bool, client_id: str = "") -> None:
     """Aggiorna awaiting_reply su Supabase e invalida cache Redis."""
     cid = client_id or config.DEFAULT_CLIENT_ID
-    await store.set_awaiting_reply(user_id, value)
+    await store.set_awaiting_reply(user_id, value, client_id=cid)
+    await cache.invalidate_profile(cid, user_id)
+
+
+async def save_user_summary(user_id: int, summary: str, client_id: str = "") -> None:
+    """Salva riassunto AI e invalida cache profilo."""
+    cid = client_id or config.DEFAULT_CLIENT_ID
+    await store.save_user_summary(user_id, summary, client_id=cid)
     await cache.invalidate_profile(cid, user_id)
 
 
 async def set_hot_lead(user_id: int, client_id: str = "") -> None:
     """Marca il lead come hot su Supabase e invalida cache Redis."""
     cid = client_id or config.DEFAULT_CLIENT_ID
-    await store.set_hot_lead(user_id)
+    await store.set_hot_lead(user_id, client_id=cid)
     await cache.invalidate_profile(cid, user_id)
 
 

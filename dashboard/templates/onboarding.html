@@ -61,7 +61,10 @@
         <div>
           <p class="text-sm font-medium" style="color:#4ade80;">Cliente creato con successo!</p>
           <p class="text-xs mt-1" style="color:#86efac;">Slug: <span x-text="createdSlug" class="font-mono"></span></p>
-          <a href="/" class="text-sm mt-2 inline-block" style="color:#86efac;">Torna alla dashboard →</a>
+          <div class="flex items-center gap-4 mt-2">
+            <a :href="`/clients/${createdSlug}/prompt-editor`" class="text-sm font-medium" style="color:#86efac;">Prompt Editor →</a>
+            <a href="/" class="text-sm" style="color:#86efac;opacity:0.7;">Dashboard</a>
+          </div>
         </div>
       </div>
 
@@ -73,7 +76,126 @@
         <p class="text-sm" style="color:#f87171;" x-text="error"></p>
       </div>
 
-      <form @submit.prevent="submitForm()" class="space-y-5" x-show="!success">
+      <!-- Step 3: Sessione Telegram -->
+      <div x-show="showSession && !success" x-cloak class="space-y-5">
+
+        <!-- Step header -->
+        <div class="rounded-xl p-5" style="background:#1a1d27;border:1px solid #2d3248;">
+          <div class="flex items-center gap-3 mb-1">
+            <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white" style="background:#4f46e5;">3</div>
+            <h2 class="text-sm font-semibold text-white">Connetti Sessione Telegram</h2>
+          </div>
+          <p class="text-xs ml-10" style="color:#6b7280;">
+            Cliente creato: <span class="font-mono" style="color:#818cf8;" x-text="createdSlug"></span>.
+            Ora collega l'account Telegram del cliente.
+          </p>
+        </div>
+
+        <!-- Session error -->
+        <div x-show="sessionError" x-cloak
+          class="rounded-xl px-5 py-4 flex items-start gap-3"
+          style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);">
+          <svg class="w-5 h-5 flex-shrink-0 mt-0.5" style="color:#f87171;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <p class="text-sm" style="color:#f87171;" x-text="sessionError"></p>
+        </div>
+
+        <!-- Phase: phone -->
+        <div x-show="sessionStep === 'phone'" class="rounded-xl p-5 space-y-4" style="background:#1a1d27;border:1px solid #2d3248;">
+          <p class="text-xs" style="color:#9ca3af;">Inserisci il numero di telefono Telegram del cliente (con prefisso internazionale).</p>
+          <div class="space-y-1.5">
+            <label class="text-xs font-medium" style="color:#9ca3af;">Numero di telefono</label>
+            <input type="tel" x-model="phoneNumber" @keydown.enter.prevent="sendOtp()"
+              class="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2"
+              style="background:#0f1117;border:1px solid #2d3248;color:#f3f4f6;"
+              placeholder="+39 333 1234567" />
+          </div>
+          <div class="flex items-center gap-3">
+            <button type="button" @click="sendOtp()" :disabled="sessionLoading || !phoneNumber.trim()"
+              class="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all"
+              style="background:#4f46e5;color:white;"
+              onmouseover="if(!this.disabled) this.style.background='#4338ca'"
+              onmouseleave="if(!this.disabled) this.style.background='#4f46e5'">
+              <svg x-show="!sessionLoading" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+              <svg x-show="sessionLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/></svg>
+              <span x-text="sessionLoading ? 'Invio...' : 'Invia OTP'"></span>
+            </button>
+            <button type="button" @click="skipSession()"
+              class="text-sm transition-all"
+              style="color:#6b7280;"
+              onmouseover="this.style.color='#9ca3af'" onmouseleave="this.style.color='#6b7280'">
+              Salta per ora
+            </button>
+          </div>
+        </div>
+
+        <!-- Phase: otp -->
+        <div x-show="sessionStep === 'otp'" class="rounded-xl p-5 space-y-4" style="background:#1a1d27;border:1px solid #2d3248;">
+          <p class="text-xs" style="color:#9ca3af;">Il cliente ha ricevuto un codice Telegram sul suo telefono. Inseriscilo qui.</p>
+          <div class="space-y-1.5">
+            <label class="text-xs font-medium" style="color:#9ca3af;">Codice OTP</label>
+            <input type="text" x-model="otpCode" @keydown.enter.prevent="confirmOtp()"
+              maxlength="6"
+              class="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 font-mono tracking-widest"
+              style="background:#0f1117;border:1px solid #2d3248;color:#f3f4f6;"
+              placeholder="12345" />
+          </div>
+          <div x-show="show2FA" class="space-y-1.5">
+            <label class="text-xs font-medium" style="color:#9ca3af;">Password 2FA <span style="color:#6b7280;">(richiesta)</span></label>
+            <input type="password" x-model="twoFaPassword"
+              class="w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2"
+              style="background:#0f1117;border:1px solid #2d3248;color:#f3f4f6;"
+              placeholder="Password cloud Telegram" />
+          </div>
+          <div class="flex items-center gap-3">
+            <button type="button" @click="confirmOtp()" :disabled="sessionLoading || !otpCode.trim()"
+              class="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all"
+              style="background:#4f46e5;color:white;"
+              onmouseover="if(!this.disabled) this.style.background='#4338ca'"
+              onmouseleave="if(!this.disabled) this.style.background='#4f46e5'">
+              <svg x-show="!sessionLoading" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+              <svg x-show="sessionLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/></svg>
+              <span x-text="sessionLoading ? 'Verifica...' : 'Conferma'"></span>
+            </button>
+            <button type="button" @click="sessionStep = 'phone'; sessionError = ''"
+              class="text-sm transition-all"
+              style="color:#6b7280;"
+              onmouseover="this.style.color='#9ca3af'" onmouseleave="this.style.color='#6b7280'">
+              ← Cambia numero
+            </button>
+            <button type="button" @click="skipSession()"
+              class="text-sm transition-all"
+              style="color:#6b7280;"
+              onmouseover="this.style.color='#9ca3af'" onmouseleave="this.style.color='#6b7280'">
+              Salta per ora
+            </button>
+          </div>
+        </div>
+
+        <!-- Phase: done -->
+        <div x-show="sessionStep === 'done'" x-cloak
+          class="rounded-xl px-5 py-4 flex items-start gap-3"
+          style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);">
+          <svg class="w-5 h-5 flex-shrink-0 mt-0.5" style="color:#34d399;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+          <div>
+            <p class="text-sm font-medium" style="color:#34d399;">✓ Sessione creata. Il bot sarà attivo entro 60 secondi.</p>
+            <div class="flex items-center gap-4 mt-3">
+              <a :href="`/clients/${currentSlug}/prompt-editor`"
+                class="text-sm font-medium px-4 py-2 rounded-lg transition-all"
+                style="background:#4f46e5;color:white;"
+                onmouseover="this.style.background='#4338ca'" onmouseleave="this.style.background='#4f46e5'">
+                Vai al Prompt Editor →
+              </a>
+              <a href="/" class="text-sm" style="color:#6b7280;"
+                onmouseover="this.style.color='#9ca3af'" onmouseleave="this.style.color='#6b7280'">
+                Dashboard
+              </a>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <form @submit.prevent="submitForm()" class="space-y-5" x-show="!success && !showSession">
 
         <!-- Section 1: Identità -->
         <div class="rounded-xl p-5 space-y-4" style="background:#1a1d27;border:1px solid #2d3248;">
@@ -285,6 +407,16 @@ function onboarding() {
     success: false,
     createdSlug: '',
     error: '',
+    // Step 3 — Sessione Telegram
+    showSession: false,
+    currentSlug: '',
+    phoneNumber: '',
+    otpCode: '',
+    twoFaPassword: '',
+    sessionStep: 'phone',
+    sessionLoading: false,
+    sessionError: '',
+    show2FA: false,
 
     slugify(text) {
       return text.toLowerCase()
@@ -333,7 +465,8 @@ function onboarding() {
           this.error = data.detail || 'Errore nella creazione del cliente.';
         } else {
           this.createdSlug = data.slug || '';
-          this.success = true;
+          this.currentSlug = data.slug || '';
+          this.showSession = true;
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }
       } catch (e) {
@@ -341,6 +474,61 @@ function onboarding() {
       } finally {
         this.submitLoading = false;
       }
+    },
+
+    async sendOtp() {
+      this.sessionLoading = true;
+      this.sessionError = '';
+      try {
+        const res = await fetch(`/api/clients/${this.currentSlug}/gen-session/start`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: this.phoneNumber }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          this.sessionError = data.detail || 'Errore nell\'invio dell\'OTP.';
+        } else {
+          this.sessionStep = 'otp';
+        }
+      } catch (e) {
+        this.sessionError = 'Errore di rete: ' + e.message;
+      } finally {
+        this.sessionLoading = false;
+      }
+    },
+
+    async confirmOtp() {
+      this.sessionLoading = true;
+      this.sessionError = '';
+      try {
+        const res = await fetch(`/api/clients/${this.currentSlug}/gen-session/confirm`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: this.otpCode, password: this.twoFaPassword }),
+        });
+        const data = await res.json();
+        if (data.needs_2fa) {
+          // OTP corretto, Telegram richiede password 2FA — sessione mantenuta dal backend
+          this.show2FA = true;
+          this.sessionError = 'Questo account ha la verifica in due passaggi attivata. Inserisci la password.';
+        } else if (!res.ok) {
+          this.sessionError = data.detail || 'Errore nella verifica del codice.';
+        } else {
+          this.sessionStep = 'done';
+        }
+      } catch (e) {
+        this.sessionError = 'Errore di rete: ' + e.message;
+      } finally {
+        this.sessionLoading = false;
+      }
+    },
+
+    skipSession() {
+      this.showSession = false;
+      this.success = true;
     },
   };
 }

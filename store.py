@@ -95,15 +95,20 @@ async def upsert_customer(
     logger.debug("upserted customer %d in Supabase", user_id)
 
 
-async def get_customer(user_id: int) -> dict | None:
+async def get_customer(user_id: int, client_id: str = "") -> dict | None:
     """Legge il profilo completo da Supabase (source of truth)."""
-    res = await _with_supabase_retry(
-        lambda sb: sb.table("customers")
-        .select("*, conversation_state(conversation_stage, turn_count)")
-        .eq("user_id", user_id)
-        .maybe_single()
-        .execute()
-    )
+
+    async def _query(sb):
+        q = (
+            sb.table("customers")
+            .select("*, conversation_state(conversation_stage, turn_count)")
+            .eq("user_id", user_id)
+        )
+        if client_id:
+            q = q.eq("client_id", client_id)
+        return await q.maybe_single().execute()
+
+    res = await _with_supabase_retry(_query)
     if res.data is None:
         return None
 
@@ -126,12 +131,14 @@ async def update_stage(user_id: int, stage: str, client_id: str = "") -> None:
         )
         .execute()
     )
-    await _with_supabase_retry(
-        lambda sb: sb.table("customers")
-        .update({"stage": stage})
-        .eq("user_id", user_id)
-        .execute()
-    )
+
+    async def _update_customers(sb):
+        q = sb.table("customers").update({"stage": stage}).eq("user_id", user_id)
+        if _cid:
+            q = q.eq("client_id", _cid)
+        return await q.execute()
+
+    await _with_supabase_retry(_update_customers)
     logger.debug("updated stage for user %d → %s", user_id, stage)
 
 
@@ -155,25 +162,31 @@ async def increment_turn_count(user_id: int) -> None:
     )
 
 
-async def set_call_booked(user_id: int, booked: bool = True) -> None:
+async def set_call_booked(
+    user_id: int, booked: bool = True, client_id: str = ""
+) -> None:
     """Imposta call_booked. Chiamato dal webhook Calendly o dai test."""
-    await _with_supabase_retry(
-        lambda sb: sb.table("customers")
-        .update({"call_booked": booked})
-        .eq("user_id", user_id)
-        .execute()
-    )
+
+    async def _op(sb):
+        q = sb.table("customers").update({"call_booked": booked}).eq("user_id", user_id)
+        if client_id:
+            q = q.eq("client_id", client_id)
+        return await q.execute()
+
+    await _with_supabase_retry(_op)
     logger.info("call_booked=%s per user %d", booked, user_id)
 
 
-async def set_lead_status(user_id: int, status: str) -> None:
+async def set_lead_status(user_id: int, status: str, client_id: str = "") -> None:
     """Aggiorna il campo status del cliente su Supabase."""
-    await _with_supabase_retry(
-        lambda sb: sb.table("customers")
-        .update({"status": status})
-        .eq("user_id", user_id)
-        .execute()
-    )
+
+    async def _op(sb):
+        q = sb.table("customers").update({"status": status}).eq("user_id", user_id)
+        if client_id:
+            q = q.eq("client_id", client_id)
+        return await q.execute()
+
+    await _with_supabase_retry(_op)
     logger.info("status=%s per user %d", status, user_id)
 
 
@@ -208,29 +221,41 @@ async def save_message(
     logger.debug("saved message role=%s for user %d", role, user_id)
 
 
-async def set_awaiting_reply(user_id: int, value: bool) -> None:
+async def set_awaiting_reply(user_id: int, value: bool, client_id: str = "") -> None:
     """Traccia se il bot sta aspettando una risposta dall'utente.
 
     Migration richiesta (una tantum su Supabase):
         ALTER TABLE customers ADD COLUMN IF NOT EXISTS awaiting_reply BOOLEAN DEFAULT FALSE;
     """
-    await _with_supabase_retry(
-        lambda sb: sb.table("customers")
-        .update({"awaiting_reply": value})
-        .eq("user_id", user_id)
-        .execute()
-    )
+
+    async def _op(sb):
+        q = (
+            sb.table("customers")
+            .update({"awaiting_reply": value})
+            .eq("user_id", user_id)
+        )
+        if client_id:
+            q = q.eq("client_id", client_id)
+        return await q.execute()
+
+    await _with_supabase_retry(_op)
     logger.debug("awaiting_reply=%s per user %d", value, user_id)
 
 
-async def save_user_summary(user_id: int, summary: str) -> None:
+async def save_user_summary(user_id: int, summary: str, client_id: str = "") -> None:
     """Salva il riassunto AI del profilo utente su Supabase."""
-    await _with_supabase_retry(
-        lambda sb: sb.table("customers")
-        .update({"user_summary": summary})
-        .eq("user_id", user_id)
-        .execute()
-    )
+
+    async def _op(sb):
+        q = (
+            sb.table("customers")
+            .update({"user_summary": summary})
+            .eq("user_id", user_id)
+        )
+        if client_id:
+            q = q.eq("client_id", client_id)
+        return await q.execute()
+
+    await _with_supabase_retry(_op)
     logger.debug("user_summary aggiornato per user %d", user_id)
 
 
@@ -289,16 +314,18 @@ async def mark_outbox_failed(record_id: str, error: str) -> None:
     )
 
 
-async def set_hot_lead(user_id: int) -> None:
+async def set_hot_lead(user_id: int, client_id: str = "") -> None:
     """Marca il lead come hot nel DB (segnale di close rilevato).
 
     Migration richiesta (una tantum su Supabase):
         ALTER TABLE customers ADD COLUMN IF NOT EXISTS hot_lead BOOLEAN DEFAULT FALSE;
     """
-    await _with_supabase_retry(
-        lambda sb: sb.table("customers")
-        .update({"hot_lead": True})
-        .eq("user_id", user_id)
-        .execute()
-    )
+
+    async def _op(sb):
+        q = sb.table("customers").update({"hot_lead": True}).eq("user_id", user_id)
+        if client_id:
+            q = q.eq("client_id", client_id)
+        return await q.execute()
+
+    await _with_supabase_retry(_op)
     logger.info("hot_lead=True impostato per user %d", user_id)

@@ -17,6 +17,12 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.requests import Request
 from supabase import AsyncClient, acreate_client
+from telethon import TelegramClient as _TelegramClient
+from telethon.errors import (
+    SessionPasswordNeededError as _SessionPasswordNeededError,
+    FloodWaitError as _FloodWaitError,
+)
+from telethon.sessions import StringSession as _StringSession
 
 try:
     from dashboard.prompt_generator import generate_client_config
@@ -55,6 +61,9 @@ def require_auth(credentials: HTTPBasicCredentials = Depends(security)) -> str:
         )
     return credentials.username
 
+
+# slug -> (TelegramClient, phone_code_hash, phone)
+_pending_sessions: dict[str, tuple] = {}
 
 _client: AsyncClient | None = None
 
@@ -130,6 +139,15 @@ class ClientUpdate(BaseModel):
     icp_rules: dict | None = None
     is_active: bool | None = None
     session_string: str | None = None
+
+
+class GenSessionStartRequest(BaseModel):
+    phone: str  # es. "+39 333 123 456"
+
+
+class GenSessionConfirmRequest(BaseModel):
+    code: str  # es. "12345"
+    password: str = ""  # 2FA opzionale
 
 
 # ---------------------------------------------------------------------------
@@ -476,6 +494,122 @@ async def update_status(
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+# ---------------------------------------------------------------------------
+# OTP Wizard — genera SESSION_STRING Telegram dalla dashboard
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/clients/{slug}/gen-session/start")
+async def gen_session_start(
+    slug: str, body: GenSessionStartRequest, _: str = Depends(require_auth)
+):
+    """Avvia il flusso OTP: invia il codice al numero di telefono."""
+    import sys as _sys
+
+    _parent = str(Path(__file__).parent.parent)
+    if _parent not in _sys.path:
+        _sys.path.insert(0, _parent)
+    import config as _config
+
+    sb = await get_client()
+    res = await (
+        sb.table("client_config")
+        .select("client_id")
+        .eq("slug", slug)
+        .maybe_single()
+        .execute()
+    )
+    if res.data is None:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    api_id = int(os.environ["API_ID"])
+    api_hash = os.environ["API_HASH"]
+
+    client = _TelegramClient(_StringSession(), api_id, api_hash)
+    try:
+        await client.connect()
+        result = await client.send_code_request(body.phone)
+        # 4-tuple: (client, phone_code_hash, phone, awaiting_2fa)
+        _pending_sessions[slug] = (client, result.phone_code_hash, body.phone, False)
+        return {"ok": True}
+    except _FloodWaitError as e:
+        await client.disconnect()
+        raise HTTPException(
+            status_code=429, detail=f"Troppi tentativi, riprova tra {e.seconds}s"
+        ) from e
+    except Exception as e:
+        await client.disconnect()
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/api/clients/{slug}/gen-session/confirm")
+async def gen_session_confirm(
+    slug: str, body: GenSessionConfirmRequest, _: str = Depends(require_auth)
+):
+    """Completa il flusso OTP: verifica il codice e salva la session_string."""
+    if slug not in _pending_sessions:
+        raise HTTPException(status_code=400, detail="Nessuna sessione in attesa")
+
+    client, phone_code_hash, phone, awaiting_2fa = _pending_sessions[slug]
+    try:
+        if awaiting_2fa:
+            # OTP già accettato da Telegram, serve solo la password 2FA
+            if not body.password:
+                raise HTTPException(status_code=400, detail="Password 2FA richiesta")
+            await client.sign_in(password=body.password)
+        else:
+            await client.sign_in(phone, body.code, phone_code_hash=phone_code_hash)
+    except _SessionPasswordNeededError:
+        if not body.password:
+            # OTP corretto, 2FA richiesta — mantieni sessione in attesa, segnala al frontend
+            _pending_sessions[slug] = (client, phone_code_hash, phone, True)
+            return {"ok": False, "needs_2fa": True}
+        try:
+            await client.sign_in(password=body.password)
+        except Exception as e:
+            await client.disconnect()
+            del _pending_sessions[slug]
+            raise HTTPException(status_code=400, detail=str(e)) from e
+    except _FloodWaitError as e:
+        await client.disconnect()
+        del _pending_sessions[slug]
+        raise HTTPException(
+            status_code=429, detail=f"Troppi tentativi, riprova tra {e.seconds}s"
+        ) from e
+    except Exception as e:
+        await client.disconnect()
+        del _pending_sessions[slug]
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    session_string = client.session.save()
+    await client.disconnect()
+    del _pending_sessions[slug]
+
+    sb = await get_client()
+    await (
+        sb.table("client_config")
+        .update({"session_string": session_string})
+        .eq("slug", slug)
+        .execute()
+    )
+    return {
+        "ok": True,
+        "message": "Sessione creata. Il bot sarà attivo entro 60 secondi.",
+    }
+
+
+@app.post("/api/clients/{slug}/gen-session/cancel")
+async def gen_session_cancel(slug: str, _: str = Depends(require_auth)):
+    """Annulla il flusso OTP in corso."""
+    if slug in _pending_sessions:
+        client, _, __, ___ = _pending_sessions.pop(slug)
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------
