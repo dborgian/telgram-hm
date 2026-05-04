@@ -364,7 +364,58 @@
             </thead>
             <tbody>
               <template x-for="c in businessClients" :key="c.client_id">
-                <tr x-data="{showConnect: false, sessionInput: '', saving: false}" style="border-bottom:1px solid #22263a;">
+                <tr x-data="{
+  step: 0,
+  phone: '',
+  code: '',
+  password: '',
+  loading: false,
+  err: '',
+  msg: '',
+  needs2fa: false,
+  async sendOtp() {
+    this.loading = true; this.err = '';
+    try {
+      const r = await fetch('/api/clients/' + c.slug + '/gen-session/start', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({phone: this.phone})
+      });
+      const d = await r.json();
+      if (!r.ok) { this.err = d.detail || 'Errore invio OTP'; return; }
+      this.step = 2;
+    } catch(e) { this.err = 'Errore di rete'; }
+    finally { this.loading = false; }
+  },
+  async verifyOtp() {
+    this.loading = true; this.err = '';
+    try {
+      const r = await fetch('/api/clients/' + c.slug + '/gen-session/confirm', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({code: this.code, password: this.password})
+      });
+      const d = await r.json();
+      if (!r.ok) { this.err = d.detail || 'Codice non valido'; return; }
+      if (d.needs_2fa) { this.needs2fa = true; this.step = 4; return; }
+      this.msg = d.message || 'Sessione attivata!';
+      c.has_session = true;
+      this.step = 3;
+    } catch(e) { this.err = 'Errore di rete'; }
+    finally { this.loading = false; }
+  },
+  async submit2fa() {
+    this.needs2fa = false;
+    await this.verifyOtp();
+  },
+  async cancel() {
+    if (this.step >= 1 && this.step < 3) {
+      fetch('/api/clients/' + c.slug + '/gen-session/cancel', {method: 'POST'}).catch(()=>{});
+    }
+    this.step = 0; this.phone = ''; this.code = ''; this.password = '';
+    this.err = ''; this.msg = ''; this.needs2fa = false;
+  }
+}" style="border-bottom:1px solid #22263a;">
                   <td class="px-4 py-3 font-medium text-white">
                     <span x-text="c.name"></span>
                     <a :href="`/clients/${c.slug}/prompt-editor`"
@@ -379,30 +430,62 @@
                     <span x-show="!c.is_active" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style="background:rgba(107,114,128,0.15);color:#6b7280;">Inattivo</span>
                   </td>
                   <td class="px-4 py-3 text-center">
-                    <span x-show="c.has_session" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style="background:rgba(74,222,128,0.15);color:#4ade80;">&#10003; Connesso</span>
-                    <span x-show="!c.has_session && !showConnect" style="color:#4b5563;">—</span>
-                    <button x-show="!showConnect" @click.stop="showConnect=true"
-                      class="ml-2 text-xs px-2 py-1 rounded-lg"
-                      style="background:#22263a;border:1px solid #3d4260;color:#818cf8;"
-                      @mouseover="$el.style.borderColor='#4f46e5'" @mouseleave="$el.style.borderColor='#3d4260'">Connetti</button>
-                    <div x-show="showConnect" x-cloak class="text-left mt-2 space-y-2">
-                      <label class="block text-xs" style="color:#6b7280;">StringSession — genera con gen_session.py</label>
-                      <textarea x-model="sessionInput" rows="3"
-                        class="w-full rounded-lg px-3 py-2 text-xs font-mono focus:outline-none resize-none"
-                        style="background:#22263a;border:1px solid #3d4260;color:#e5e7eb;"
-                        placeholder="Incolla la StringSession qui..."></textarea>
-                      <div class="flex gap-2">
-                        <button @click.stop="saving=true;fetch('/api/clients/'+c.slug,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_string:sessionInput})}).then(r=>{if(r.ok){c.has_session=true;showConnect=false;sessionInput=''}else{alert('Errore nel salvataggio')}}).finally(()=>saving=false)"
-                          :disabled="saving || !sessionInput.trim()"
-                          class="px-3 py-1.5 rounded-lg text-xs font-medium"
-                          :style="saving||!sessionInput.trim() ? 'background:#2d3248;color:#4b5563;cursor:not-allowed;' : 'background:#4f46e5;color:white;cursor:pointer;'">
-                          <span x-text="saving ? 'Salvataggio...' : 'Salva'"></span>
-                        </button>
-                        <button @click.stop="showConnect=false;sessionInput=''"
-                          class="px-3 py-1.5 rounded-lg text-xs font-medium"
-                          style="background:#22263a;border:1px solid #3d4260;color:#9ca3af;">Annulla</button>
+                    <span x-show="c.has_session && step === 0" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style="background:rgba(74,222,128,0.15);color:#4ade80;">&#10003; Connesso</span>
+
+                    <template x-if="step === 0">
+                      <button @click.stop="step=1" class="ml-1 text-xs px-2 py-1 rounded-lg" style="background:#22263a;border:1px solid #3d4260;color:#818cf8;" @mouseover="$el.style.borderColor='#4f46e5'" @mouseleave="$el.style.borderColor='#3d4260'">
+                        <span x-text="c.has_session ? 'Riconnetti' : 'Connetti'"></span>
+                      </button>
+                    </template>
+
+                    <template x-if="step === 1">
+                      <div class="text-left mt-2 space-y-2">
+                        <label class="block text-xs" style="color:#6b7280;">Numero di telefono</label>
+                        <input x-model="phone" type="tel" placeholder="+39..." class="w-full rounded-lg px-3 py-2 text-xs focus:outline-none" style="background:#22263a;border:1px solid #3d4260;color:#e5e7eb;" @keydown.enter.prevent="sendOtp()">
+                        <p x-show="err" x-text="err" class="text-xs" style="color:#f87171;"></p>
+                        <div class="flex gap-2">
+                          <button @click.stop="sendOtp()" :disabled="loading || !phone.trim()" class="px-3 py-1.5 rounded-lg text-xs font-medium" :style="(loading||!phone.trim()) ? 'background:#2d3248;color:#4b5563;cursor:not-allowed;' : 'background:#4f46e5;color:white;cursor:pointer;'">
+                            <span x-text="loading ? 'Invio...' : 'Invia OTP'"></span>
+                          </button>
+                          <button @click.stop="cancel()" class="px-3 py-1.5 rounded-lg text-xs font-medium" style="background:#22263a;border:1px solid #3d4260;color:#9ca3af;">Annulla</button>
+                        </div>
                       </div>
-                    </div>
+                    </template>
+
+                    <template x-if="step === 2">
+                      <div class="text-left mt-2 space-y-2">
+                        <label class="block text-xs" style="color:#6b7280;">Codice OTP ricevuto su Telegram</label>
+                        <input x-model="code" type="text" placeholder="12345" maxlength="10" class="w-full rounded-lg px-3 py-2 text-xs focus:outline-none" style="background:#22263a;border:1px solid #3d4260;color:#e5e7eb;" @keydown.enter.prevent="verifyOtp()">
+                        <p x-show="err" x-text="err" class="text-xs" style="color:#f87171;"></p>
+                        <div class="flex gap-2">
+                          <button @click.stop="verifyOtp()" :disabled="loading || !code.trim()" class="px-3 py-1.5 rounded-lg text-xs font-medium" :style="(loading||!code.trim()) ? 'background:#2d3248;color:#4b5563;cursor:not-allowed;' : 'background:#4f46e5;color:white;cursor:pointer;'">
+                            <span x-text="loading ? 'Verifica...' : 'Verifica'"></span>
+                          </button>
+                          <button @click.stop="cancel()" class="px-3 py-1.5 rounded-lg text-xs font-medium" style="background:#22263a;border:1px solid #3d4260;color:#9ca3af;">Annulla</button>
+                        </div>
+                      </div>
+                    </template>
+
+                    <template x-if="step === 3">
+                      <div class="text-left mt-2 space-y-2">
+                        <p class="text-xs" style="color:#4ade80;" x-text="msg || 'Sessione attivata!'"></p>
+                        <button @click.stop="cancel()" class="px-3 py-1.5 rounded-lg text-xs font-medium" style="background:#22263a;border:1px solid #3d4260;color:#9ca3af;">Chiudi</button>
+                      </div>
+                    </template>
+
+                    <template x-if="step === 4">
+                      <div class="text-left mt-2 space-y-2">
+                        <label class="block text-xs" style="color:#f59e0b;">&#9888; Password 2FA richiesta</label>
+                        <input x-model="password" type="password" placeholder="Password Telegram..." class="w-full rounded-lg px-3 py-2 text-xs focus:outline-none" style="background:#22263a;border:1px solid #f59e0b;color:#e5e7eb;" @keydown.enter.prevent="submit2fa()">
+                        <p x-show="err" x-text="err" class="text-xs" style="color:#f87171;"></p>
+                        <div class="flex gap-2">
+                          <button @click.stop="submit2fa()" :disabled="loading || !password.trim()" class="px-3 py-1.5 rounded-lg text-xs font-medium" :style="(loading||!password.trim()) ? 'background:#2d3248;color:#4b5563;cursor:not-allowed;' : 'background:#f59e0b;color:#1a1d27;cursor:pointer;'">
+                            <span x-text="loading ? 'Verifica...' : 'Conferma 2FA'"></span>
+                          </button>
+                          <button @click.stop="cancel()" class="px-3 py-1.5 rounded-lg text-xs font-medium" style="background:#22263a;border:1px solid #3d4260;color:#9ca3af;">Annulla</button>
+                        </div>
+                      </div>
+                    </template>
                   </td>
                   <td class="px-4 py-3 text-xs" style="color:#6b7280;" x-text="c.created_at ? formatDate(c.created_at) : '—'"></td>
                 </tr>
