@@ -29,7 +29,7 @@ try:
 except ImportError:
     from prompt_generator import generate_client_config
 
-load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 SUPABASE_URL: str = os.environ["SUPABASE_URL"]
 SUPABASE_KEY: str = os.environ["SUPABASE_KEY"]
@@ -454,7 +454,7 @@ async def send_message_to_user(
     try:
         import sys
 
-        parent_dir = str(Path(__file__).parent.parent)
+        parent_dir = str(Path(__file__).resolve().parent.parent)
         if parent_dir not in sys.path:
             sys.path.insert(0, parent_dir)
         import store as _store
@@ -515,7 +515,7 @@ async def gen_session_start(
     """Avvia il flusso OTP: invia il codice al numero di telefono."""
     import sys as _sys
 
-    _parent = str(Path(__file__).parent.parent)
+    _parent = str(Path(__file__).resolve().parent.parent)
     if _parent not in _sys.path:
         _sys.path.insert(0, _parent)
     import config as _config
@@ -735,7 +735,7 @@ async def update_client(slug: str, body: ClientUpdate, _: str = Depends(require_
         try:
             import sys as _sys
 
-            _parent = str(Path(__file__).parent.parent)
+            _parent = str(Path(__file__).resolve().parent.parent)
             if _parent not in _sys.path:
                 _sys.path.insert(0, _parent)
             import cache as _cache
