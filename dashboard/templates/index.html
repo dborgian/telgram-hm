@@ -911,7 +911,7 @@ function dashboard() {
         const r = await fetch(`/api/customers/${this.selectedCustomer.user_id}/send_message`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({message: this.manualMessage.trim()})
+          body: JSON.stringify({message: this.manualMessage.trim(), client_id: this.selectedCustomer.client_id || ''})
         });
         if (!r.ok) throw new Error((await r.json()).detail || 'Errore');
         this.sendMessageStatus = 'Messaggio in coda';

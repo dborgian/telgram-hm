@@ -478,12 +478,12 @@ async def send_message_to_user(
                 sb.table("customers")
                 .select("client_id")
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            client_id = ((res.data or {}).get("client_id")) or os.getenv(
-                "DEFAULT_CLIENT_ID", "00000000-0000-0000-0000-000000000001"
-            )
+            client_id = (
+                res.data[0].get("client_id") if res.data else None
+            ) or os.getenv("DEFAULT_CLIENT_ID", "00000000-0000-0000-0000-000000000001")
 
         # Insert directly via Supabase — avoids importing store.py (not available in dashboard container)
         record_id = str(uuid.uuid4())
