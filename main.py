@@ -290,7 +290,7 @@ async def _outbox_worker() -> None:
 
 
 async def _poll_new_clients() -> None:
-    """Poll Supabase every 60s for new active clients and start their TelegramClients."""
+    """Poll Supabase every 60s for new/updated active clients."""
     while True:
         await asyncio.sleep(60)
         try:
@@ -299,6 +299,22 @@ async def _poll_new_clients() -> None:
                 if cfg.client_id not in _clients:
                     logger.info("New client detected: %s — starting", cfg.client_id)
                     await _start_telegram_client(cfg)
+                else:
+                    # Rileva session_string cambiata (es. dopo OTP Wizard)
+                    existing = _clients[cfg.client_id]
+                    current_session = (
+                        existing.session.save() if existing.is_connected() else ""
+                    )
+                    if cfg.session_string and cfg.session_string != current_session:
+                        logger.info(
+                            "Session changed for client %s — reloading", cfg.client_id
+                        )
+                        try:
+                            await existing.disconnect()
+                        except Exception:
+                            pass
+                        del _clients[cfg.client_id]
+                        await _start_telegram_client(cfg)
         except Exception:
             logger.exception("Error in _poll_new_clients")
 
