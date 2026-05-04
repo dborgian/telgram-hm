@@ -414,6 +414,17 @@
     }
     this.step = 0; this.phone = ''; this.code = ''; this.password = '';
     this.err = ''; this.msg = ''; this.needs2fa = false;
+  },
+  async disconnect() {
+    if (!confirm('Disconnettere la sessione Telegram? Il bot smetterà di rispondere entro 60s.')) return;
+    this.loading = true; this.err = '';
+    try {
+      const r = await fetch('/api/clients/' + c.slug + '/gen-session/disconnect', {method: 'POST'});
+      const d = r.headers.get('content-type')?.includes('application/json') ? await r.json() : {};
+      if (!r.ok) { this.err = d.detail || ('Errore ' + r.status); return; }
+      c.has_session = false;
+    } catch(e) { this.err = 'Errore: ' + (e.message || e); }
+    finally { this.loading = false; }
   }
 }" style="border-bottom:1px solid #22263a;">
                   <td class="px-4 py-3 font-medium text-white">
@@ -433,9 +444,14 @@
                     <span x-show="c.has_session && step === 0" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style="background:rgba(74,222,128,0.15);color:#4ade80;">&#10003; Connesso</span>
 
                     <template x-if="step === 0">
-                      <button @click.stop="step=1" class="ml-1 text-xs px-2 py-1 rounded-lg" style="background:#22263a;border:1px solid #3d4260;color:#818cf8;" @mouseover="$el.style.borderColor='#4f46e5'" @mouseleave="$el.style.borderColor='#3d4260'">
-                        <span x-text="c.has_session ? 'Riconnetti' : 'Connetti'"></span>
-                      </button>
+                      <span class="inline-flex gap-1">
+                        <button @click.stop="step=1" class="text-xs px-2 py-1 rounded-lg" style="background:#22263a;border:1px solid #3d4260;color:#818cf8;" @mouseover="$el.style.borderColor='#4f46e5'" @mouseleave="$el.style.borderColor='#3d4260'">
+                          <span x-text="c.has_session ? 'Riconnetti' : 'Connetti'"></span>
+                        </button>
+                        <button x-show="c.has_session" @click.stop="disconnect()" :disabled="loading" class="text-xs px-2 py-1 rounded-lg" style="background:#22263a;border:1px solid #3d4260;color:#ef4444;" @mouseover="$el.style.borderColor='#ef4444'" @mouseleave="$el.style.borderColor='#3d4260'">
+                          Disconnetti
+                        </button>
+                      </span>
                     </template>
 
                     <template x-if="step === 1">

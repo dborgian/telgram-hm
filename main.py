@@ -290,11 +290,23 @@ async def _outbox_worker() -> None:
 
 
 async def _poll_new_clients() -> None:
-    """Poll Supabase every 60s for new/updated active clients."""
+    """Poll Supabase every 60s for new/updated/removed active clients."""
     while True:
         await asyncio.sleep(60)
         try:
             all_cfgs = await db.get_all_active_clients()
+            active_ids = {cfg.client_id for cfg in all_cfgs}
+
+            # Disconnetti client rimossi dal DB (session_string=NULL o is_active=False)
+            for client_id in list(_clients.keys()):
+                if client_id not in active_ids:
+                    logger.info("Client %s removed — disconnecting", client_id)
+                    try:
+                        await _clients[client_id].disconnect()
+                    except Exception:
+                        pass
+                    del _clients[client_id]
+
             for cfg in all_cfgs:
                 if cfg.client_id not in _clients:
                     logger.info("New client detected: %s — starting", cfg.client_id)

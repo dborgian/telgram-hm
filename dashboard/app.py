@@ -615,6 +615,39 @@ async def gen_session_cancel(slug: str, _: str = Depends(require_auth)):
     return {"ok": True}
 
 
+@app.post("/api/clients/{slug}/gen-session/disconnect")
+async def gen_session_disconnect(slug: str, _: str = Depends(require_auth)):
+    """Rimuove la session_string dal DB — il bot si disconnette entro 60s."""
+    sb = await get_client()
+    res = await (
+        sb.table("client_config")
+        .select("client_id")
+        .eq("slug", slug)
+        .maybe_single()
+        .execute()
+    )
+    if res.data is None:
+        raise HTTPException(status_code=404, detail="Client not found")
+    client_id = res.data["client_id"]
+    await (
+        sb.table("client_config")
+        .update({"session_string": None})
+        .eq("slug", slug)
+        .execute()
+    )
+    # Invalida cache Redis config:{client_id}
+    _redis_url = os.getenv("UPSTASH_REDIS_URL", "")
+    if _redis_url:
+        try:
+            from upstash_redis.asyncio import Redis as _Redis
+
+            _r = _Redis.from_url(_redis_url)
+            await _r.delete(f"config:{client_id}")
+        except Exception:
+            pass
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------------------
 # Fase 2 — Prompt Generator / Client Management
 # ---------------------------------------------------------------------------
