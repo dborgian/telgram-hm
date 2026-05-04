@@ -381,10 +381,10 @@
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({phone: this.phone})
       });
-      const d = await r.json();
-      if (!r.ok) { this.err = d.detail || 'Errore invio OTP'; return; }
+      const d = r.headers.get('content-type')?.includes('application/json') ? await r.json() : {};
+      if (!r.ok) { this.err = d.detail || ('Errore ' + r.status); return; }
       this.step = 2;
-    } catch(e) { this.err = 'Errore di rete'; }
+    } catch(e) { this.err = 'Errore: ' + (e.message || e); }
     finally { this.loading = false; }
   },
   async verifyOtp() {
@@ -395,13 +395,13 @@
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({code: this.code, password: this.password})
       });
-      const d = await r.json();
-      if (!r.ok) { this.err = d.detail || 'Codice non valido'; return; }
+      const d = r.headers.get('content-type')?.includes('application/json') ? await r.json() : {};
+      if (!r.ok) { this.err = d.detail || ('Errore ' + r.status); return; }
       if (d.needs_2fa) { this.needs2fa = true; this.step = 4; return; }
       this.msg = d.message || 'Sessione attivata!';
       c.has_session = true;
       this.step = 3;
-    } catch(e) { this.err = 'Errore di rete'; }
+    } catch(e) { this.err = 'Errore: ' + (e.message || e); }
     finally { this.loading = false; }
   },
   async submit2fa() {
