@@ -142,23 +142,28 @@ async def update_stage(user_id: int, stage: str, client_id: str = "") -> None:
     logger.debug("updated stage for user %d → %s", user_id, stage)
 
 
-async def increment_turn_count(user_id: int) -> None:
+async def increment_turn_count(user_id: int, client_id: str = "") -> None:
     """Incrementa il contatore turni in modo atomico tramite RPC PostgreSQL.
 
     Richiede questa funzione su Supabase (SQL editor, una tantum):
 
-        CREATE OR REPLACE FUNCTION increment_turn_count(p_user_id bigint)
+        DROP FUNCTION IF EXISTS increment_turn_count(bigint);
+        DROP FUNCTION IF EXISTS increment_turn_count(bigint, uuid);
+        CREATE OR REPLACE FUNCTION increment_turn_count(p_user_id bigint, p_client_id uuid)
         RETURNS void LANGUAGE sql AS $$
-          INSERT INTO conversation_state (user_id, turn_count, last_reply_at)
-          VALUES (p_user_id, 1, now())
-          ON CONFLICT (user_id)
+          INSERT INTO conversation_state (user_id, client_id, turn_count, last_reply_at)
+          VALUES (p_user_id, p_client_id, 1, now())
+          ON CONFLICT (client_id, user_id)
           DO UPDATE SET
             turn_count = conversation_state.turn_count + 1,
             last_reply_at = now();
         $$;
     """
+    _cid = client_id or config.DEFAULT_CLIENT_ID
     await _with_supabase_retry(
-        lambda sb: sb.rpc("increment_turn_count", {"p_user_id": user_id}).execute()
+        lambda sb: sb.rpc(
+            "increment_turn_count", {"p_user_id": user_id, "p_client_id": _cid}
+        ).execute()
     )
 
 

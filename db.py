@@ -60,7 +60,7 @@ async def save_turn(
     cid = client_id or config.DEFAULT_CLIENT_ID
     await cache.save_turn(cid, user_id, user_msg, assistant_msg)
     await asyncio.gather(
-        store.increment_turn_count(user_id),
+        store.increment_turn_count(user_id, client_id=cid),
         store.save_message(user_id, "user", user_msg, client_id=cid),
         store.save_message(user_id, "assistant", assistant_msg, client_id=cid),
         return_exceptions=True,  # messages table potrebbe non esistere ancora
