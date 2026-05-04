@@ -435,6 +435,38 @@ async def get_messages(user_id: int, _: str = Depends(require_auth)):
         raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
+@app.delete("/api/customers/{user_id}")
+async def delete_customer(
+    user_id: int, client_id: str = "", _: str = Depends(require_auth)
+):
+    """Elimina cliente e tutti i dati correlati (messages, conversation_state, customers)."""
+    try:
+        sb = await get_client()
+        cid = client_id or os.getenv(
+            "DEFAULT_CLIENT_ID", "00000000-0000-0000-0000-000000000001"
+        )
+        await sb.table("messages").delete().eq("user_id", user_id).eq(
+            "client_id", cid
+        ).execute()
+        await sb.table("conversation_state").delete().eq("user_id", user_id).eq(
+            "client_id", cid
+        ).execute()
+        res = (
+            await sb.table("customers")
+            .delete()
+            .eq("user_id", user_id)
+            .eq("client_id", cid)
+            .execute()
+        )
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Cliente non trovato")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
 @app.patch("/api/customers/{user_id}/notes")
 async def update_notes(user_id: int, body: NotesUpdate, _: str = Depends(require_auth)):
     try:

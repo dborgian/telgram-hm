@@ -550,14 +550,24 @@
             x-text="[selectedCustomer?.username ? '@'+selectedCustomer.username : null, selectedCustomer?.user_id ? '#'+selectedCustomer.user_id : null].filter(Boolean).join(' · ')"></div>
         </div>
       </div>
-      <button @click="selectedCustomer=null"
-        class="w-8 h-8 flex items-center justify-center rounded-lg transition-colors flex-shrink-0"
-        style="color:#9ca3af;"
-        @mouseover="$el.style.background='#22263a';$el.style.color='white'"
-        @mouseleave="$el.style.background='';$el.style.color='#9ca3af'"
-        aria-label="Chiudi">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-      </button>
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <button @click="deleteCustomer(selectedCustomer)"
+          class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+          style="background:rgba(239,68,68,0.1);color:#f87171;border:1px solid rgba(239,68,68,0.2);"
+          @mouseover="$el.style.background='rgba(239,68,68,0.2)'"
+          @mouseleave="$el.style.background='rgba(239,68,68,0.1)'"
+          title="Elimina cliente e tutti i suoi dati">
+          🗑 Elimina
+        </button>
+        <button @click="selectedCustomer=null"
+          class="w-8 h-8 flex items-center justify-center rounded-lg transition-colors"
+          style="color:#9ca3af;"
+          @mouseover="$el.style.background='#22263a';$el.style.color='white'"
+          @mouseleave="$el.style.background='';$el.style.color='#9ca3af'"
+          aria-label="Chiudi">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
     </div>
     <!-- Tabs -->
     <div class="flex-shrink-0 px-6" style="border-bottom:1px solid #2d3248;">
@@ -923,6 +933,18 @@ function dashboard() {
       } finally {
         this.sendingMessage = false;
       }
+    },
+
+    async deleteCustomer(c) {
+      if (!c) return;
+      const name = c.first_name || `#${c.user_id}`;
+      if (!confirm(`Eliminare ${name} e tutti i suoi dati (messaggi, stage, note)? Operazione irreversibile.`)) return;
+      try {
+        const r = await fetch(`/api/customers/${c.user_id}?client_id=${encodeURIComponent(c.client_id||'')}`, {method:'DELETE'});
+        if (!r.ok) { const d = await r.json(); throw new Error(d.detail||'Errore'); }
+        this.selectedCustomer = null;
+        this.customers = this.customers.filter(x => !(x.user_id===c.user_id && x.client_id===c.client_id));
+      } catch(e) { alert('Errore eliminazione: ' + e.message); }
     },
 
     async saveNote(userId, note) {
