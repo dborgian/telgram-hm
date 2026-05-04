@@ -148,6 +148,12 @@
               class="rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none w-52"
               style="background:#22263a;border:1px solid #3d4260;color:#e5e7eb;" />
           </div>
+          <select x-model="filterClient" class="rounded-lg px-3 py-2 text-sm focus:outline-none" style="background:#22263a;border:1px solid #3d4260;color:#d1d5db;">
+            <option value="">Tutti i clienti</option>
+            <template x-for="bc in businessClients" :key="bc.client_id">
+              <option :value="bc.client_id" x-text="bc.name || bc.slug"></option>
+            </template>
+          </select>
           <select x-model="filterStage" class="rounded-lg px-3 py-2 text-sm focus:outline-none" style="background:#22263a;border:1px solid #3d4260;color:#d1d5db;">
             <option value="">Tutti gli stage</option>
             <template x-for="(label,key) in STAGE_LABELS" :key="key">
@@ -724,6 +730,7 @@ function dashboard() {
     filterStage: '',
     filterStatus: '',
     filterCallBooked: false,
+    filterClient: '',
     loading: false,
     lastRefresh: null,
     convChart: null,
@@ -831,6 +838,7 @@ function dashboard() {
       const q = this.searchQuery.toLowerCase().trim();
       return this.customers.filter(c => {
         if (q && !((c.first_name||'').toLowerCase().includes(q)||(c.username||'').toLowerCase().includes(q))) return false;
+        if (this.filterClient && c.client_id !== this.filterClient) return false;
         if (this.filterStage && c.stage !== this.filterStage) return false;
         if (this.filterStatus && c.status !== this.filterStatus) return false;
         if (this.filterCallBooked && !c.call_booked) return false;
