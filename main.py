@@ -262,6 +262,33 @@ async def _start_telegram_client(cfg: ClientConfig) -> None:
     logger.info("Started TelegramClient for client_id=%s", cfg.client_id)
 
 
+async def _outbox_worker() -> None:
+    """Polling outbox Supabase ogni 10s e invia messaggi via Telethon."""
+    import store as _store
+
+    while True:
+        try:
+            for client_id, tg_client in _clients.items():
+                pending = await _store.get_pending_outbox(client_id, limit=20)
+                for record in pending:
+                    try:
+                        await tg_client.send_message(
+                            int(record["user_id"]), record["message"]
+                        )
+                        await _store.mark_outbox_sent(record["id"])
+                        logger.info(
+                            "Outbox sent: user=%s msg_id=%s",
+                            record["user_id"],
+                            record["id"],
+                        )
+                    except Exception as e:
+                        await _store.mark_outbox_failed(record["id"], str(e))
+                        logger.warning("Outbox failed: %s — %s", record["id"], e)
+        except Exception as e:
+            logger.warning("Outbox worker error: %s", e)
+        await asyncio.sleep(10)
+
+
 async def _poll_new_clients() -> None:
     """Poll Supabase every 60s for new active clients and start their TelegramClients."""
     while True:
@@ -309,13 +336,15 @@ async def main() -> None:
 
     logger.info("Started %d TelegramClient(s)", len(_clients))
 
-    # Run polling + all clients
+    # Run polling + outbox worker + all clients
     poll_task = asyncio.create_task(_poll_new_clients(), name="poll-new-clients")
+    outbox_task = asyncio.create_task(_outbox_worker(), name="outbox-worker")
 
     try:
         await asyncio.gather(*[c.run_until_disconnected() for c in _clients.values()])
     finally:
         poll_task.cancel()
+        outbox_task.cancel()
         await webhook_runner.cleanup()
         # Cancel all workers
         for client_workers in _workers.values():

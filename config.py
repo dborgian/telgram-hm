@@ -56,3 +56,6 @@ DEFAULT_CLIENT_ID: str = os.getenv(
     "DEFAULT_CLIENT_ID", "00000000-0000-0000-0000-000000000001"
 )
 CLIENT_CONFIG_CACHE_TTL: int = int(os.getenv("CLIENT_CONFIG_CACHE_TTL", "3600"))
+
+# Anthropic API — per AI Prompt Editor nella dashboard
+ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")

@@ -225,6 +225,7 @@ async def get_customer(user_id: int, _: str = Depends(require_auth)):
             or bool(customer.get("call_booked"))
             or (customer.get("conversation_stage") in HOT_STAGES)
         )
+        customer["user_summary"] = customer.get("user_summary") or ""
 
         transitions = await (
             sb.table("stage_transitions_log")

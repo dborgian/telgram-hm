@@ -89,7 +89,7 @@ async def upsert_customer(
     }
     await _with_supabase_retry(
         lambda sb: sb.table("customers")
-        .upsert(payload, on_conflict="user_id", ignore_duplicates=False)
+        .upsert(payload, on_conflict="client_id,user_id", ignore_duplicates=False)
         .execute()
     )
     logger.debug("upserted customer %d in Supabase", user_id)
@@ -127,7 +127,7 @@ async def update_stage(user_id: int, stage: str, client_id: str = "") -> None:
         lambda sb: sb.table("conversation_state")
         .upsert(
             {"user_id": user_id, "client_id": _cid, "conversation_stage": stage},
-            on_conflict="user_id",
+            on_conflict="client_id,user_id",
         )
         .execute()
     )
