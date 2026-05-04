@@ -227,15 +227,19 @@ async def get_customer(user_id: int, _: str = Depends(require_auth)):
         )
         customer["user_summary"] = customer.get("user_summary") or ""
 
-        transitions = await (
-            sb.table("stage_transitions_log")
-            .select("*")
-            .eq("user_id", user_id)
-            .order("created_at", desc=True)
-            .limit(20)
-            .execute()
-        )
-        return {"customer": customer, "transitions": transitions.data}
+        try:
+            transitions = await (
+                sb.table("stage_transitions_log")
+                .select("*")
+                .eq("user_id", user_id)
+                .order("created_at", desc=True)
+                .limit(20)
+                .execute()
+            )
+            transitions_data = transitions.data
+        except Exception:
+            transitions_data = []
+        return {"customer": customer, "transitions": transitions_data}
     except HTTPException:
         raise
     except Exception as exc:
@@ -475,7 +479,9 @@ async def send_message_to_user(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail="Errore invio messaggio") from exc
+        raise HTTPException(
+            status_code=500, detail=f"Errore invio messaggio: {str(exc)[:300]}"
+        ) from exc
 
 
 @app.patch("/api/customers/{user_id}/status")
