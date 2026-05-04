@@ -3,17 +3,10 @@
 import os
 import re
 import secrets
-import sys
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta, date
 from pathlib import Path
-
-# Ensure the project root (parent of dashboard/) is on sys.path so that
-# store.py, config.py, cache.py etc. are importable on Railway.
-_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Depends
@@ -459,13 +452,11 @@ async def send_message_to_user(
             status_code=400, detail="Messaggio troppo lungo (max 4096 char)"
         )
     try:
-        import store as _store
-        import config as _config
+        sb = await get_client()
 
-        # Resolve client_id from customers table if not provided — fixes multi-client bug
+        # Resolve client_id from customers table if not provided
         client_id = body.client_id
         if not client_id:
-            sb = await get_client()
             res = await (
                 sb.table("customers")
                 .select("client_id")
@@ -473,10 +464,20 @@ async def send_message_to_user(
                 .maybe_single()
                 .execute()
             )
-            client_id = ((res.data or {}).get("client_id")) or _config.DEFAULT_CLIENT_ID
-        record_id = await _store.insert_outbox_message(
-            user_id, client_id, body.message.strip()
-        )
+            client_id = ((res.data or {}).get("client_id")) or os.getenv(
+                "DEFAULT_CLIENT_ID", "00000000-0000-0000-0000-000000000001"
+            )
+
+        # Insert directly via Supabase — avoids importing store.py (not available in dashboard container)
+        record_id = str(uuid.uuid4())
+        await sb.table("outbox").insert(
+            {
+                "id": record_id,
+                "user_id": user_id,
+                "client_id": client_id,
+                "message": body.message.strip(),
+            }
+        ).execute()
         return {"ok": True, "record_id": record_id}
     except HTTPException:
         raise
@@ -515,8 +516,6 @@ async def gen_session_start(
     slug: str, body: GenSessionStartRequest, _: str = Depends(require_auth)
 ):
     """Avvia il flusso OTP: invia il codice al numero di telefono."""
-    import config as _config
-
     sb = await get_client()
     res = await (
         sb.table("client_config")
@@ -730,13 +729,14 @@ async def update_client(slug: str, body: ClientUpdate, _: str = Depends(require_
             raise HTTPException(status_code=404, detail="Client not found")
         # Invalida cache Redis config:{client_id} così il bot usa subito il nuovo prompt
         try:
-            import cache as _cache
+            from upstash_redis.asyncio import Redis as _Redis
 
-            client_id = res.data[0].get("client_id", "")
-            if client_id:
-                await _cache._with_redis_retry(
-                    lambda r: r.delete(f"config:{client_id}")
-                )
+            _redis_url = os.getenv("UPSTASH_REDIS_URL", "")
+            if _redis_url:
+                _r = _Redis.from_url(_redis_url)
+                client_id = res.data[0].get("client_id", "")
+                if client_id:
+                    await _r.delete(f"config:{client_id}")
         except Exception:
             pass  # cache invalidation best-effort
         return {"ok": True}
