@@ -186,7 +186,7 @@
                 </tr>
               </thead>
               <tbody>
-                <template x-for="c in filteredCustomers" :key="c.user_id">
+                <template x-for="c in filteredCustomers" :key="c.user_id + '_' + (c.client_id || '')">
                   <tr @click="openCustomer(c.user_id)" class="cursor-pointer transition-colors"
                     style="border-bottom:1px solid #22263a;"
                     @mouseover="$el.style.background='#22263a'" @mouseleave="$el.style.background=''">
@@ -832,7 +832,7 @@ function dashboard() {
       return this.customers.filter(c => {
         if (q && !((c.first_name||'').toLowerCase().includes(q)||(c.username||'').toLowerCase().includes(q))) return false;
         if (this.filterStage && c.stage !== this.filterStage) return false;
-        if (this.filterStatus === 'LL' && c.status !== 'LL') return false;
+        if (this.filterStatus && c.status !== this.filterStatus) return false;
         if (this.filterCallBooked && !c.call_booked) return false;
         return true;
       });

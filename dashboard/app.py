@@ -171,19 +171,32 @@ async def list_customers(_: str = Depends(require_auth)):
     # ALTER TABLE customers ADD COLUMN IF NOT EXISTS user_summary text;
     try:
         sb = await get_client()
-        res = await (
-            sb.table("customers")
-            .select(
-                "*, conversation_state(conversation_stage, turn_count, last_reply_at)"
-            )
+        res = (
+            await sb.table("customers")
+            .select("*")
             .order("last_seen", desc=True)
             .execute()
         )
+        rows = res.data or []
+
+        # Separate query for conversation_state — avoids PostgREST FK join issues
+        if rows:
+            cs_res = await (
+                sb.table("conversation_state")
+                .select(
+                    "client_id, user_id, conversation_stage, turn_count, last_reply_at"
+                )
+                .execute()
+            )
+            cs_map = {(r["client_id"], r["user_id"]): r for r in (cs_res.data or [])}
+        else:
+            cs_map = {}
+
         out = []
-        for row in res.data:
+        for row in rows:
             r = dict(row)
-            cs = r.pop("conversation_state", None) or {}
-            r["conversation_stage"] = cs.get("conversation_stage")
+            cs = cs_map.get((r.get("client_id"), r.get("user_id")), {})
+            r["conversation_stage"] = cs.get("conversation_stage") or r.get("stage")
             r["turn_count"] = cs.get("turn_count", 0)
             r["last_reply_at"] = cs.get("last_reply_at")
             r["hot_lead"] = (
@@ -205,19 +218,23 @@ async def get_customer(user_id: int, _: str = Depends(require_auth)):
     try:
         sb = await get_client()
         res = await (
-            sb.table("customers")
-            .select(
-                "*, conversation_state(conversation_stage, turn_count, last_reply_at)"
-            )
+            sb.table("customers").select("*").eq("user_id", user_id).limit(1).execute()
+        )
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Customer not found")
+        customer = dict(res.data[0])
+        cs_res = await (
+            sb.table("conversation_state")
+            .select("conversation_stage, turn_count, last_reply_at")
             .eq("user_id", user_id)
-            .maybe_single()
+            .eq("client_id", customer.get("client_id", ""))
+            .limit(1)
             .execute()
         )
-        if res.data is None:
-            raise HTTPException(status_code=404, detail="Customer not found")
-        customer = dict(res.data)
-        cs = customer.pop("conversation_state", None) or {}
-        customer["conversation_stage"] = cs.get("conversation_stage")
+        cs = cs_res.data[0] if cs_res.data else {}
+        customer["conversation_stage"] = cs.get("conversation_stage") or customer.get(
+            "stage"
+        )
         customer["turn_count"] = cs.get("turn_count", 0)
         customer["last_reply_at"] = cs.get("last_reply_at")
         customer["hot_lead"] = (
