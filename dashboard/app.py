@@ -3,10 +3,17 @@
 import os
 import re
 import secrets
+import sys
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta, date
 from pathlib import Path
+
+# Ensure the project root (parent of dashboard/) is on sys.path so that
+# store.py, config.py, cache.py etc. are importable on Railway.
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Depends
@@ -452,11 +459,6 @@ async def send_message_to_user(
             status_code=400, detail="Messaggio troppo lungo (max 4096 char)"
         )
     try:
-        import sys
-
-        parent_dir = str(Path(__file__).resolve().parent.parent)
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
         import store as _store
         import config as _config
 
@@ -513,11 +515,6 @@ async def gen_session_start(
     slug: str, body: GenSessionStartRequest, _: str = Depends(require_auth)
 ):
     """Avvia il flusso OTP: invia il codice al numero di telefono."""
-    import sys as _sys
-
-    _parent = str(Path(__file__).resolve().parent.parent)
-    if _parent not in _sys.path:
-        _sys.path.insert(0, _parent)
     import config as _config
 
     sb = await get_client()
@@ -733,11 +730,6 @@ async def update_client(slug: str, body: ClientUpdate, _: str = Depends(require_
             raise HTTPException(status_code=404, detail="Client not found")
         # Invalida cache Redis config:{client_id} così il bot usa subito il nuovo prompt
         try:
-            import sys as _sys
-
-            _parent = str(Path(__file__).resolve().parent.parent)
-            if _parent not in _sys.path:
-                _sys.path.insert(0, _parent)
             import cache as _cache
 
             client_id = res.data[0].get("client_id", "")
